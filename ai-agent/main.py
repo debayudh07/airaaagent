@@ -345,7 +345,9 @@ class MCPConfig:
         "defillama_coins": "https://coins.llama.fi",
         "defillama_yields": "https://yields.llama.fi",
         "defillama_stablecoins": "https://stablecoins.llama.fi",
-        "defillama_bridges": "https://bridges.llama.fi"
+        "defillama_bridges": "https://bridges.llama.fi",
+        # Pro-only DefiLlama (guarded; no key configured here)
+        "defillama_pro": "https://pro-api.llama.fi"
         # Commented out unused APIs
         # "artemis": "https://api.artemisxyz.com",
         # "nansen": "https://api.nansen.ai/v1"
@@ -809,6 +811,88 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                 }
             return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
 
+        # 1.a) Historical prices for tokens by timestamp
+        if ("historical" in q and "price" in q) or "/prices/historical" in q:
+            assets = extract_known_coingecko_assets(q)
+            if not assets:
+                return {"success": False, "error": "Specify tokens (e.g., bitcoin, ethereum) to fetch historical prices"}
+            # naive timestamp extraction
+            ts_match = re.search(r"(19|20|21|22|23|24)?\b(\d{10})\b", q)
+            if not ts_match:
+                return {"success": False, "error": "Specify UNIX timestamp for historical prices"}
+            timestamp = ts_match.group(2)
+            coins_param = ",".join(assets)
+            resp = await safe_http_request(
+                'GET',
+                f"{MCPConfig.BASE_URLS['defillama_coins']}/prices/historical/{timestamp}/{coins_param}"
+            )
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "data": resp.json(),
+                    "metadata": {"endpoint": "/prices/historical/{timestamp}/{coins}", "coins": assets, "timestamp": timestamp},
+                    "source": "defillama"
+                }
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 1.b) Percentage change over time for coins
+        if "percentage" in q and ("coin" in q or "coins" in q or any(sym in q for sym in ASSET_NAME_TO_COINGECKO.keys())):
+            assets = extract_known_coingecko_assets(q)
+            if not assets:
+                return {"success": False, "error": "Specify tokens (e.g., bitcoin, ethereum) for percentage endpoint"}
+            coins_param = ",".join(assets)
+            params = {}
+            period_match = re.search(r"(\b\d+[wdhm]\b)", q)
+            if period_match:
+                params["period"] = period_match.group(1)
+            ts_match = re.search(r"\b(\d{10})\b", q)
+            if ts_match:
+                params["timestamp"] = ts_match.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_coins']}/percentage/{coins_param}", params=params)
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/percentage/{coins}", "coins": assets, "params": params}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 1.c) First price record for coins
+        if ("first price" in q) or "/prices/first" in q:
+            assets = extract_known_coingecko_assets(q)
+            if not assets:
+                return {"success": False, "error": "Specify tokens for /prices/first"}
+            coins_param = ",".join(assets)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_coins']}/prices/first/{coins_param}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/prices/first/{coins}", "coins": assets}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 1.d) Price chart for coins
+        if ("chart" in q and ("coin" in q or "coins" in q)) or "/chart/" in q:
+            assets = extract_known_coingecko_assets(q)
+            if not assets:
+                return {"success": False, "error": "Specify tokens for /chart/{coins}"}
+            coins_param = ",".join(assets)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_coins']}/chart/{coins_param}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/chart/{coins}", "coins": assets}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 1.e) Batch historical prices (requires explicit JSON coins mapping)
+        if "batch" in q and "historical" in q and ("price" in q or "prices" in q):
+            return {"success": False, "error": "Provide explicit coins/timestamps mapping via UI to use /batchHistorical"}
+
+        # 1.f) Get nearest block to a timestamp on a chain
+        if "block" in q and "timestamp" in q:
+            chain = extract_chain_from_text(q)
+            if not chain:
+                return {"success": False, "error": "Specify chain for /block/{chain}/{timestamp}"}
+            ts_match = re.search(r"\b(\d{10})\b", q)
+            if not ts_match:
+                return {"success": False, "error": "Specify UNIX timestamp for /block/{chain}/{timestamp}"}
+            timestamp = ts_match.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_coins']}/block/{chain}/{timestamp}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/block/{chain}/{timestamp}", "chain": chain, "timestamp": timestamp}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
         # 2) Protocol TVL detail (if protocol mentioned)
         if any(k in q for k in ["tvl", "protocol", "defi"]):
             # naive extraction: last word after 'protocol' or use known ones
@@ -829,6 +913,15 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                         "success": True,
                         "data": resp.json(),
                         "metadata": {"endpoint": "/protocol/{protocol}", "protocol": protocol_slug},
+                        "source": "defillama"
+                    }
+                # Try protocol TVL timeseries if available
+                resp2 = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/tvl/{protocol_slug}")
+                if 200 <= resp2.status_code < 300:
+                    return {
+                        "success": True,
+                        "data": resp2.json(),
+                        "metadata": {"endpoint": "/tvl/{protocol}", "protocol": protocol_slug},
                         "source": "defillama"
                     }
             # fallback: list protocols with tvl
@@ -855,6 +948,13 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                     "metadata": {"endpoint": "/v2/historicalChainTvl/{chain}", "chain": ch},
                     "source": "defillama"
                 }
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 3.a) All chains snapshot
+        if "chains" in q and not ("bridge" in q):
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/v2/chains")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/v2/chains"}, "source": "defillama"}
             return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
 
         # 4) Stablecoins
@@ -895,6 +995,16 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                 }
             return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
 
+        # 5.a) Yield pool chart when a pool id is present
+        if ("chart" in q and "pool" in q) or "/chart/" in q:
+            pool_match = re.search(r"pool\s*[:=\s]([0-9a-f\-]{8,})", q)
+            if pool_match:
+                pool_id = pool_match.group(1)
+                resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_yields']}/chart/{pool_id}")
+                if resp.status_code == 200:
+                    return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/chart/{pool}", "pool": pool_id}, "source": "defillama"}
+                return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
         # 6) DEX volumes
         if "dex" in q or "volume" in q:
             ch = extract_chain_from_text(q)
@@ -915,6 +1025,40 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                     "metadata": {"endpoint": "/overview/dexs", "chain": ch},
                     "source": "defillama"
                 }
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 6.a) DEX summary for a specific protocol (requires slug)
+        if "summary" in q and "dex" in q:
+            # Expect 'protocol: <slug>' pattern to avoid guessing
+            m = re.search(r"protocol\s*[:=]\s*([a-z0-9\-]+)", q)
+            if not m:
+                return {"success": False, "error": "Provide 'protocol: <slug>' for /summary/dexs/{protocol}"}
+            slug = m.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/summary/dexs/{slug}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/summary/dexs/{protocol}", "protocol": slug}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 6.b) Options overview/summary
+        if "options" in q:
+            ch = extract_chain_from_text(q)
+            params = {"excludeTotalDataChart": "true", "excludeTotalDataChartBreakdown": "true"}
+            if ch:
+                resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/overview/options/{ch}", params=params)
+            else:
+                resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/overview/options", params=params)
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/overview/options", "chain": ch}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        if "summary" in q and "options" in q:
+            m = re.search(r"protocol\s*[:=]\s*([a-z0-9\-]+)", q)
+            if not m:
+                return {"success": False, "error": "Provide 'protocol: <slug>' for /summary/options/{protocol}"}
+            slug = m.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/summary/options/{slug}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/summary/options/{protocol}", "protocol": slug}, "source": "defillama"}
             return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
 
         # 7) Fees and revenue
@@ -939,6 +1083,17 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                 }
             return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
 
+        # 7.a) Fees summary per protocol
+        if "summary" in q and "fees" in q:
+            m = re.search(r"protocol\s*[:=]\s*([a-z0-9\-]+)", q)
+            if not m:
+                return {"success": False, "error": "Provide 'protocol: <slug>' for /summary/fees/{protocol}"}
+            slug = m.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/summary/fees/{slug}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/summary/fees/{protocol}", "protocol": slug}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
         # 8) Bridges
         if "bridge" in q or "bridges" in q:
             ch = extract_chain_from_text(q)
@@ -956,6 +1111,85 @@ async def defillama_tool(query: str) -> Dict[str, Any]:
                     "source": "defillama"
                 }
             return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 8.a) Bridge summary by id
+        if "/bridge/" in q or ("bridge" in q and "id" in q and "summary" in q):
+            m = re.search(r"id\s*[:=]\s*(\d+)", q)
+            if not m:
+                return {"success": False, "error": "Provide 'id: <bridgeId>' for /bridge/{id}"}
+            bridge_id = m.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_bridges']}/bridge/{bridge_id}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/bridge/{id}", "id": bridge_id}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 8.b) Bridge day stats
+        if "bridgedaystats" in q:
+            ts_match = re.search(r"\b(\d{10})\b", q)
+            ch = extract_chain_from_text(q)
+            if not (ts_match and ch):
+                return {"success": False, "error": "Provide timestamp and chain for /bridgedaystats/{timestamp}/{chain}"}
+            timestamp = ts_match.group(1)
+            # optional id
+            id_match = re.search(r"id\s*[:=]\s*(\d+)", q)
+            params = {"id": id_match.group(1)} if id_match else None
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_bridges']}/bridgedaystats/{timestamp}/{ch}", params=params)
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/bridgedaystats/{timestamp}/{chain}", "chain": ch, "timestamp": timestamp, "params": params}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 8.c) Bridge transactions by id with optional filters
+        if "transactions" in q and ("bridge" in q or "/transactions/" in q):
+            m = re.search(r"id\s*[:=]\s*(\d+)", q)
+            if not m:
+                return {"success": False, "error": "Provide 'id: <bridgeId>' for /transactions/{id}"}
+            bridge_id = m.group(1)
+            params: Dict[str, Any] = {}
+            for key in ["starttimestamp", "endtimestamp", "sourcechain", "address", "limit"]:
+                m2 = re.search(rf"{key}\s*[:=]\s*([^\s]+)", q)
+                if m2:
+                    params[key] = m2.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_bridges']}/transactions/{bridge_id}", params=params or None)
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/transactions/{id}", "id": bridge_id, "params": params}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 9) Stablecoin utilities: stablecoinchains, stablecoinprices, specific asset
+        if "stablecoinchains" in q:
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_stablecoins']}/stablecoinchains")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/stablecoinchains"}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        if "stablecoinprices" in q:
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_stablecoins']}/stablecoinprices")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/stablecoinprices"}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        if "stablecoin" in q and ("asset" in q or "/stablecoin/" in q):
+            # Expect 'asset: <slug>' to avoid guessing
+            m = re.search(r"asset\s*[:=]\s*([a-z0-9\-]+)", q)
+            if not m:
+                return {"success": False, "error": "Provide 'asset: <stablecoin-slug>' for /stablecoin/{asset}"}
+            asset = m.group(1)
+            resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama_stablecoins']}/stablecoin/{asset}")
+            if resp.status_code == 200:
+                return {"success": True, "data": resp.json(), "metadata": {"endpoint": "/stablecoin/{asset}", "asset": asset}, "source": "defillama"}
+            return {"success": False, "error": f"HTTP {resp.status_code}", "source": "defillama"}
+
+        # 10) Pro-only endpoints guard (no API key configured here)
+        pro_markers = [
+            "tokenprotocols", "inflows", "chainassets", "activeusers", "userdata", "emissions", "emission", "categories", "forks", "oracles", "hacks", "raises", "treasuries", "entities", "historicalliquidity",
+            "poolsborrow", "chartlendborrow", "perps", "lsdrates", "etfs", "fdv", "derivatives"
+        ]
+        if any(marker in q.replace(" ", "") for marker in pro_markers):
+            return {
+                "success": False,
+                "error": "Requested endpoint is Pro-only on DefiLlama and is not accessible without credentials",
+                "metadata": {"note": "pro-only endpoint"},
+                "source": "defillama"
+            }
 
         # Default fallback: list chains
         resp = await safe_http_request('GET', f"{MCPConfig.BASE_URLS['defillama']}/v2/chains")
@@ -1803,6 +2037,49 @@ USER QUERY ADAPTATION:
         
         return min(score, max_score)
     
+    def _select_canonical_data(self, merged_data: Dict) -> Dict[str, Any]:
+        """Select a single source of truth per section to avoid conflicting data.
+        Preferences:
+        - tvl/stablecoins/dex/fees/yields/bridges → defillama
+        - market → coinmarketcap
+        - wallet/transactions → etherscan
+        - dex_trading (pairs) → dune_analytics
+        """
+        canonical: Dict[str, Any] = {}
+        supplementary = merged_data.get("supplementary_data", {}) or {}
+        primary = merged_data.get("primary_data", {}) or {}
+
+        # DefiLlama-led sections
+        if isinstance(supplementary.get("defillama_tvl"), dict):
+            canonical["tvl"] = {"source": "defillama", "data": supplementary["defillama_tvl"]}
+        if isinstance(supplementary.get("defillama_stablecoins"), dict):
+            canonical["stablecoins"] = {"source": "defillama", "data": supplementary["defillama_stablecoins"]}
+        if isinstance(supplementary.get("defillama_dex"), dict):
+            canonical["dex_overview"] = {"source": "defillama", "data": supplementary["defillama_dex"]}
+        if isinstance(supplementary.get("defillama_fees"), dict):
+            canonical["fees_overview"] = {"source": "defillama", "data": supplementary["defillama_fees"]}
+        if isinstance(supplementary.get("defillama_yields"), dict):
+            canonical["yields"] = {"source": "defillama", "data": supplementary["defillama_yields"]}
+        if isinstance(supplementary.get("defillama_bridges"), dict):
+            canonical["bridges"] = {"source": "defillama", "data": supplementary["defillama_bridges"]}
+
+        # CoinMarketCap market data (choose first market_data)
+        market_items = [v for v in primary.values() if isinstance(v, dict) and v.get("type") == "market_data"]
+        if market_items:
+            canonical["market"] = {"source": "coinmarketcap", "data": market_items[0]}
+
+        # Dune DEX pairs/trading
+        if isinstance(primary.get("dex_trading"), dict):
+            canonical["dex_trading"] = {"source": "dune_analytics", "data": primary["dex_trading"]}
+
+        # Etherscan wallet and txs
+        if isinstance(supplementary.get("wallet_balance"), dict):
+            canonical["wallet_balance"] = {"source": "etherscan", "data": supplementary["wallet_balance"]}
+        if isinstance(supplementary.get("transactions"), dict):
+            canonical["transactions"] = {"source": "etherscan", "data": supplementary["transactions"]}
+
+        return canonical
+    
     def _format_final_result(self, result: str, query_intent: str, merged_data: Dict = None) -> str:
         """Format the final result based on query intent and data completeness"""
         
@@ -2128,6 +2405,30 @@ USER QUERY ADAPTATION:
         
         # Add merged data analysis if available
         if merged_data:
+            # Canonical selection to prevent conflicting sources
+            canonical = self._select_canonical_data(merged_data)
+            context_parts.append("\n✅ === CANONICAL DATA (SOURCE OF TRUTH) ===")
+            if canonical.get("market"):
+                m = canonical["market"]["data"]
+                context_parts.append(f"Use CoinMarketCap for market: {m.get('symbol','N/A')} price {_fmt_money(m.get('price'), 8)} cap {_fmt_money(m.get('market_cap'), 0)}")
+            if canonical.get("tvl"):
+                context_parts.append("Use DefiLlama for TVL overview")
+            if canonical.get("stablecoins"):
+                context_parts.append("Use DefiLlama for stablecoins overview")
+            if canonical.get("dex_overview"):
+                context_parts.append("Use DefiLlama for DEX overview volumes")
+            if canonical.get("fees_overview"):
+                context_parts.append("Use DefiLlama for fees/revenue overview")
+            if canonical.get("yields"):
+                context_parts.append("Use DefiLlama for yields data")
+            if canonical.get("bridges"):
+                context_parts.append("Use DefiLlama for bridges data")
+            if canonical.get("dex_trading"):
+                d = canonical["dex_trading"]["data"]
+                context_parts.append(f"Use Dune for DEX trading pairs (total pairs: {d.get('total_pairs',0)})")
+            if canonical.get("wallet_balance") or canonical.get("transactions"):
+                context_parts.append("Use Etherscan for wallet balances and transactions")
+
             context_parts.append("\n🔥 === CRITICAL: EXACT API DATA TO USE === 🔥")
             
             # Extract and highlight CoinMarketCap data prominently
