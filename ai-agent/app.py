@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Optional
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 
 # Import agent components
@@ -22,12 +22,36 @@ def create_app() -> Flask:
 
     CORS(
         app,
-        resources={r"/api/*": {
-            "origins": allowed_origins,
-            "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-        }},
+        origins=allowed_origins,
+        methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+        supports_credentials=False,
+        send_wildcard=True,
+        vary_header=True,
+        max_age=3600,
     )
+
+    @app.after_request
+    def ensure_cors_headers(response):
+        try:
+            # Only apply to API routes
+            if request.path.startswith("/api/"):
+                request_origin = request.headers.get("Origin")
+                allow_origin_value = "*"
+                if allowed_origins != "*" and isinstance(allowed_origins, list):
+                    if request_origin and request_origin in allowed_origins:
+                        allow_origin_value = request_origin
+                    else:
+                        allow_origin_value = ""
+
+                if allow_origin_value:
+                    response.headers["Access-Control-Allow-Origin"] = allow_origin_value
+                    response.headers["Vary"] = "Origin"
+                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        except Exception:
+            pass
+        return response
 
     # Initialize shared HTTP client once for all requests
     try:
@@ -48,6 +72,11 @@ def create_app() -> Flask:
     @app.route("/api/health", methods=["GET"])
     def health() -> tuple:
         return jsonify({"status": "ok"}), 200
+
+    # Explicit preflight handlers to ensure CORS headers on OPTIONS
+    @app.route("/api/health", methods=["OPTIONS"])
+    def health_preflight():
+        return make_response("", 200)
 
     @app.route("/api/research", methods=["POST"])
     def research_route():
@@ -81,9 +110,12 @@ def create_app() -> Flask:
                     asyncio.set_event_loop(None)
 
             return jsonify(result), 200 if result.get("success") else 502
-
         except Exception as exc:
             return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/research", methods=["OPTIONS"])
+    def research_preflight():
+        return make_response("", 200)
 
     return app
 
