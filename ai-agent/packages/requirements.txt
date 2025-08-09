@@ -1,0 +1,23 @@
+# Core dependencies for CLI Web3 Research Agent
+httpx==0.25.2
+flask==3.0.3
+flask-cors==4.0.1
+
+# LangChain dependencies - using more stable versions
+langchain==0.2.16
+langchain-core==0.2.38
+langchain-google-genai==1.0.10
+langchain-community==0.2.16
+
+# Comment out unused web framework dependencies
+# fastapi==0.104.1
+# uvicorn[standard]==0.24.0
+
+# Comment out database dependencies  
+# asyncpg==0.29.0
+
+# Comment out multipart since it's for web forms
+# python-multipart==0.0.6
+
+# Keep python-dotenv for environment variable support (optional)
+# python-dotenv==1.0.0
