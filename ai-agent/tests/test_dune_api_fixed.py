@@ -2,13 +2,17 @@ import asyncio
 import httpx
 import json
 import logging
+import os
+from dotenv import load_dotenv, find_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # API Configuration
-DUNE_API_KEY = "UIKeACbIHIVEXxxm21nLw21wco1MpW4I"
+# Load environment variables for tests
+load_dotenv(find_dotenv())
+DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
 BASE_URL = "https://api.dune.com/api/v1"
 
 async def test_dune_api_endpoints():

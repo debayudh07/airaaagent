@@ -17,6 +17,7 @@ from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.memory import ChatMessageHistory
 from langchain_community.cache import InMemoryCache
+from dotenv import load_dotenv, find_dotenv
 from langchain.globals import set_llm_cache
 
 # Configure logging
@@ -29,10 +30,13 @@ set_llm_cache(InMemoryCache())
 # =============================
 # Configuration & API Keys
 # =============================
-ETHERSCAN_API_KEY = "88X4DT5WSPNBQHXNN7AH2Z541P9AN4VWI4"
-DUNE_API_KEY = "UIKeACbIHIVEXxxm21nLw21wco1MpW4I"
-COINMARKETCAP_API_KEY = "3353074b-ed9f-429b-9225-a60e3f93def9"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyDCPa0ElH9NwtiUK4guVSR92vICxn_5NTk")
+# Load environment variables from nearest .env up the directory tree
+load_dotenv(find_dotenv())
+
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
+DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
+COINMARKETCAP_API_KEY = os.getenv("COINMARKETCAP_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Commented out unused API keys
 # ARTEMIS_API_KEY = ""

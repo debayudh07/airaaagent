@@ -19,5 +19,4 @@ langchain-community==0.2.16
 # Comment out multipart since it's for web forms
 # python-multipart==0.0.6
 
-# Keep python-dotenv for environment variable support (optional)
-# python-dotenv==1.0.0
+python-dotenv==1.0.1
