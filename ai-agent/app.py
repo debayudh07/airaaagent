@@ -33,35 +33,19 @@ def create_app() -> Flask:
     )
 
     @app.after_request
-    def ensure_cors_headers(response):
-        origin = request.headers.get("Origin")
-        # Normalize allowed origins check
-        is_wildcard = allowed_origins == "*"
-        is_allowed = is_wildcard or (isinstance(allowed_origins, list) and origin in allowed_origins)
-
-        if origin and is_allowed:
-            response.headers["Access-Control-Allow-Origin"] = "*" if is_wildcard else origin
-            response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            # Do not set Allow-Credentials since we aren't using credentials
-        return response
-
-    @app.after_request
-    def ensure_cors_headers(response):
+    def add_cors_headers(response):
         try:
             # Only apply to API routes
             if request.path.startswith("/api/"):
                 request_origin = request.headers.get("Origin")
-                allow_origin_value = "*"
-                if allowed_origins != "*" and isinstance(allowed_origins, list):
-                    if request_origin and request_origin in allowed_origins:
-                        allow_origin_value = request_origin
-                    else:
-                        allow_origin_value = ""
-
-                if allow_origin_value:
-                    response.headers["Access-Control-Allow-Origin"] = allow_origin_value
+                # Default to wildcard when allowed_origins is '*'
+                if allowed_origins == "*":
+                    response.headers["Access-Control-Allow-Origin"] = "*"
+                else:
+                    if request_origin and isinstance(allowed_origins, list) and request_origin in allowed_origins:
+                        response.headers["Access-Control-Allow-Origin"] = request_origin
+                # Common headers
+                if "Access-Control-Allow-Origin" in response.headers:
                     response.headers["Vary"] = "Origin"
                     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
                     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
