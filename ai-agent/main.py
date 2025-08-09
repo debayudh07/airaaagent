@@ -2320,13 +2320,13 @@ USER QUERY ADAPTATION:
                         if chains:
                             context_parts.append("  • TVL Overview (Top Chains):")
                             for c in chains[:5]:
-                                context_parts.append(f"     - {c.get('name', 'Unknown')}: ${c.get('tvl_usd', 0):,.0f}")
+                                context_parts.append(f"     - {c.get('name', 'Unknown')}: {_fmt_money(c.get('tvl_usd'), 0)}")
                     elif data_type == "stablecoins_overview":
                         assets = data_item.get("top_assets", [])
                         if assets:
                             context_parts.append("  • Stablecoins (Top):")
                             for a in assets[:5]:
-                                context_parts.append(f"     - {a.get('symbol') or a.get('name')}: ${a.get('circulating_usd', 0):,.0f}")
+                                context_parts.append(f"     - {a.get('symbol') or a.get('name')}: {_fmt_money(a.get('circulating_usd'), 0)}")
                     elif data_type == "dex_overview":
                         protos = data_item.get("sample_protocols", [])
                         if protos:
@@ -2555,14 +2555,20 @@ def _format_coinmarketcap_data(data):
             elif isinstance(cmc_data, dict) and "quote" in cmc_data:
                 print("     🌍 Global Cryptocurrency Metrics:")
                 quote = cmc_data.get("quote", {}).get("USD", {})
-                print(f"       Total Market Cap: ${quote.get('total_market_cap', 0):,.0f}")
-                print(f"       Total Volume 24h: ${quote.get('total_volume_24h', 0):,.0f}")
+                print(f"       Total Market Cap: {_fmt_money(quote.get('total_market_cap'), 0)}")
+                print(f"       Total Volume 24h: {_fmt_money(quote.get('total_volume_24h'), 0)}")
                 print(f"       Bitcoin Dominance: {cmc_data.get('btc_dominance', 0):.2f}%")
                 print(f"       Ethereum Dominance: {cmc_data.get('eth_dominance', 0):.2f}%")
                 if "total_cryptocurrencies" in cmc_data:
-                    print(f"       Total Cryptocurrencies: {cmc_data.get('total_cryptocurrencies', 0):,}")
+                    try:
+                        print(f"       Total Cryptocurrencies: {int(cmc_data.get('total_cryptocurrencies') or 0):,}")
+                    except Exception:
+                        print(f"       Total Cryptocurrencies: N/A")
                 if "total_exchanges" in cmc_data:
-                    print(f"       Total Exchanges: {cmc_data.get('total_exchanges', 0):,}")
+                    try:
+                        print(f"       Total Exchanges: {int(cmc_data.get('total_exchanges') or 0):,}")
+                    except Exception:
+                        print(f"       Total Exchanges: N/A")
                     
             # Handle key info response
             elif isinstance(cmc_data, dict) and "usage" in cmc_data:
@@ -2570,9 +2576,17 @@ def _format_coinmarketcap_data(data):
                 usage = cmc_data.get("usage", {})
                 plan = cmc_data.get("plan", {})
                 print(f"       Plan: {plan.get('name', 'N/A')}")
-                print(f"       Monthly Credits: {plan.get('credit_limit_monthly', 0):,}")
-                print(f"       Credits Used: {usage.get('current_month', {}).get('credits_used', 0):,}")
-                remaining = plan.get('credit_limit_monthly', 0) - usage.get('current_month', {}).get('credits_used', 0)
+                try:
+                    monthly = int(plan.get('credit_limit_monthly') or 0)
+                except Exception:
+                    monthly = 0
+                try:
+                    used = int(usage.get('current_month', {}).get('credits_used') or 0)
+                except Exception:
+                    used = 0
+                remaining = monthly - used
+                print(f"       Monthly Credits: {monthly:,}")
+                print(f"       Credits Used: {used:,}")
                 print(f"       Credits Remaining: {remaining:,}")
                 
             # Handle cryptocurrency listings
@@ -2583,26 +2597,32 @@ def _format_coinmarketcap_data(data):
                     name = crypto.get("name", "Unknown")
                     symbol = crypto.get("symbol", "N/A")
                     quote = crypto.get("quote", {}).get("USD", {})
-                    price = quote.get("price", 0)
-                    change_24h = quote.get("percent_change_24h", 0)
-                    market_cap = quote.get("market_cap", 0)
-                    volume_24h = quote.get("volume_24h", 0)
+                    price = quote.get("price")
+                    change_24h = quote.get("percent_change_24h")
+                    market_cap = quote.get("market_cap")
+                    volume_24h = quote.get("volume_24h")
                     
                     print(f"     {i+1}. {name} ({symbol})")
-                    print(f"       Price: ${price:.4f} ({change_24h:+.2f}%)")
-                    print(f"       Market Cap: ${market_cap:,.0f}")
-                    print(f"       24h Volume: ${volume_24h:,.0f}")
+                    try:
+                        print(f"       Price: ${float(price):.4f} ({float(change_24h):+.2f}%)")
+                    except Exception:
+                        print(f"       Price: N/A ({_fmt_pct(change_24h)})")
+                    print(f"       Market Cap: {_fmt_money(market_cap, 0)}")
+                    print(f"       24h Volume: {_fmt_money(volume_24h, 0)}")
                     
             # Handle single token data
             elif isinstance(cmc_data, dict):
                 for symbol, token_data in list(cmc_data.items())[:3]:
                     quote = token_data.get("quote", {}).get("USD", {})
-                    price = quote.get("price", 0)
-                    change_24h = quote.get("percent_change_24h", 0)
-                    market_cap = quote.get("market_cap", 0)
+                    price = quote.get("price")
+                    change_24h = quote.get("percent_change_24h")
+                    market_cap = quote.get("market_cap")
                     print(f"     {symbol}")
-                    print(f"       Price: ${price:.4f} ({change_24h:+.2f}%)")
-                    print(f"       Market Cap: ${market_cap:,.0f}")
+                    try:
+                        print(f"       Price: ${float(price):.4f} ({float(change_24h):+.2f}%)")
+                    except Exception:
+                        print(f"       Price: N/A ({_fmt_pct(change_24h)})")
+                    print(f"       Market Cap: {_fmt_money(market_cap, 0)}")
         else:
             # Handle legacy format or other structures
             if isinstance(data, dict):
@@ -2632,10 +2652,13 @@ def _format_dune_data(data):
                 volume_liquidity_ratio = pair.get("seven_day_volume_liquidity_ratio", 0)
                 
                 print(f"     Pair {i+1}: {token0.get('symbol', 'N/A')}/{token1.get('symbol', 'N/A')}")
-                print(f"       Price: ${price:.4f}")
-                print(f"       1D Volume: ${one_day_volume:,.2f}")
-                print(f"       7D Volume: ${seven_day_volume:,.2f}")
-                print(f"       USD Liquidity: ${usd_liquidity:,.2f}")
+                try:
+                    print(f"       Price: ${float(price):.4f}")
+                except Exception:
+                    print(f"       Price: N/A")
+                print(f"       1D Volume: {_fmt_money(one_day_volume, 2)}")
+                print(f"       7D Volume: {_fmt_money(seven_day_volume, 2)}")
+                print(f"       USD Liquidity: {_fmt_money(usd_liquidity, 2)}")
                 print(f"       7D Vol/Liq Ratio: {volume_liquidity_ratio:.2f}")
                 print(f"       Address: {pair.get('pair_address', 'N/A')[:20]}...")
         # Check if this is SQL query results (volume analysis data)
@@ -2646,7 +2669,7 @@ def _format_dune_data(data):
                 volume = trade_data.get("volume", 0)
                 
                 print(f"     {i+1}. {pair}")
-                print(f"       7D Volume: ${volume:,.2f}")
+                print(f"       7D Volume: {_fmt_money(volume, 2)}")
                 
                 # Additional fields if available
                 if "token_bought_symbol" in trade_data:
