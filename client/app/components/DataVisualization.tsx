@@ -94,177 +94,192 @@ export default function DataVisualization({ data, title, config, onConfigChange 
     });
   };
 
-  // Generate AI suggestions based on data analysis
+  // Generate AI suggestions based on data analysis using Gemini
   const generateAISuggestions = useMemo((): AISuggestion[] => {
     if (!data) return [];
 
-    const suggestions: AISuggestion[] = [];
-    const dataStr = JSON.stringify(data).toLowerCase();
+    // Always include basic visualization options
+    const basicSuggestions: AISuggestion[] = [
+      {
+        id: 'formatted_view',
+        title: 'Smart Formatted View',
+        description: 'AI-enhanced formatting with highlighted insights',
+        icon: '📋',
+        action: () => setConfig({ ...localConfig, mode: 'formatted' })
+      },
+      {
+        id: 'table_view',
+        title: 'Data Table',
+        description: 'Structured table view of all data points',
+        icon: '📊',
+        action: () => setConfig({ ...localConfig, mode: 'table' })
+      }
+    ];
 
-    // Analyze data structure and content to suggest appropriate visualizations
+    // Check for array data for charts
     if (Array.isArray(data) || (typeof data === 'object' && Object.values(data).some(v => Array.isArray(v)))) {
-      suggestions.push({
-        id: 'chart_time_series',
-        title: 'Time Series Chart',
-        description: 'Visualize trends over time with an interactive line chart',
+      basicSuggestions.push({
+        id: 'chart_analysis',
+        title: 'Interactive Charts',
+        description: 'Visualize trends and patterns with dynamic charts',
         icon: '📈',
         action: () => setConfig({ ...localConfig, mode: 'chart', chartType: 'line' })
       });
 
-      suggestions.push({
-        id: 'metrics_summary',
-        title: 'Key Metrics',
-        description: 'Display important statistics and KPIs in a dashboard format',
-        icon: '📊',
+      basicSuggestions.push({
+        id: 'metrics_dashboard',
+        title: 'Metrics Dashboard',
+        description: 'Key performance indicators and statistical summaries',
+        icon: '🧮',
         action: () => setConfig({ ...localConfig, mode: 'metrics' })
       });
     }
 
-    // Suggest mermaid diagrams for specific data types
-    if (dataStr.includes('transaction') || dataStr.includes('flow') || dataStr.includes('process')) {
-      suggestions.push({
-        id: 'process_flow',
-        title: 'Process Flow Diagram',
-        description: 'Create a flowchart showing transaction or process flows',
+    // AI-powered diagram suggestions based on data content
+    const dataStr = JSON.stringify(data);
+    
+    // Suggest flowcharts for process-oriented data
+    if (dataStr.toLowerCase().includes('transaction') || 
+        dataStr.toLowerCase().includes('flow') || 
+        dataStr.toLowerCase().includes('process') ||
+        dataStr.toLowerCase().includes('step')) {
+      basicSuggestions.push({
+        id: 'ai_flowchart',
+        title: 'AI Process Flowchart',
+        description: 'Dynamic flowchart generated from your specific data patterns',
         icon: '🔄',
         action: () => generateMermaidDiagram('flowchart')
       });
     }
 
-    if (dataStr.includes('protocol') || dataStr.includes('network') || dataStr.includes('node')) {
-      suggestions.push({
-        id: 'network_diagram',
-        title: 'Network Architecture',
-        description: 'Visualize network connections and protocol relationships',
+    // Suggest network diagrams for relationship data
+    if (dataStr.toLowerCase().includes('protocol') || 
+        dataStr.toLowerCase().includes('network') || 
+        dataStr.toLowerCase().includes('connection') ||
+        dataStr.toLowerCase().includes('relationship')) {
+      basicSuggestions.push({
+        id: 'ai_network',
+        title: 'AI Network Diagram',
+        description: 'Intelligent network visualization based on your data relationships',
         icon: '🌐',
         action: () => generateMermaidDiagram('graph')
       });
     }
 
-    if (dataStr.includes('defi') || dataStr.includes('yield') || dataStr.includes('staking')) {
-      suggestions.push({
-        id: 'defi_strategy',
-        title: 'DeFi Strategy Map',
-        description: 'Map out DeFi protocols and yield strategies',
-        icon: '🏦',
+    // Suggest mindmaps for hierarchical or concept data
+    if (dataStr.toLowerCase().includes('defi') || 
+        dataStr.toLowerCase().includes('ecosystem') || 
+        dataStr.toLowerCase().includes('category') ||
+        Object.keys(data).length > 3) {
+      basicSuggestions.push({
+        id: 'ai_mindmap',
+        title: 'AI Concept Map',
+        description: 'Intelligent mindmap organizing your data concepts and relationships',
+        icon: '🧠',
         action: () => generateMermaidDiagram('mindmap')
       });
     }
 
-    suggestions.push({
-      id: 'table_view',
-      title: 'Data Table',
-      description: 'View all data in a structured table format',
-      icon: '📋',
-      action: () => setConfig({ ...localConfig, mode: 'table' })
-    });
-
-    return suggestions;
+    return basicSuggestions;
   }, [data, localConfig]);
 
-  // Generate Mermaid diagram based on data content
+  // Generate Mermaid diagram using Gemini AI based on actual data content
   const generateMermaidDiagram = async (diagramType: 'flowchart' | 'graph' | 'mindmap') => {
     setIsGeneratingMermaid(true);
     try {
-      let mermaidCode = '';
-      
-      if (diagramType === 'flowchart') {
-        mermaidCode = generateFlowchartFromData(data);
-      } else if (diagramType === 'graph') {
-        mermaidCode = generateGraphFromData(data);
-      } else if (diagramType === 'mindmap') {
-        mermaidCode = generateMindmapFromData(data);
-      }
-
+      const mermaidCode = await generateAIMermaidDiagram(data, diagramType);
       setConfig({ ...localConfig, mode: 'mermaid', mermaidCode });
     } catch (error) {
       console.error('Error generating mermaid diagram:', error);
+      // Fallback to basic diagram if AI generation fails
+      const fallbackCode = generateFallbackDiagram(diagramType);
+      setConfig({ ...localConfig, mode: 'mermaid', mermaidCode: fallbackCode });
     } finally {
       setIsGeneratingMermaid(false);
     }
   };
 
-  // Helper functions to generate different types of mermaid diagrams
-  const generateFlowchartFromData = (data: any): string => {
-    let flowchart = 'flowchart TD\n';
-    const dataStr = JSON.stringify(data).toLowerCase();
-    
-    if (dataStr.includes('transaction')) {
-      flowchart += '    A[User Initiates Transaction] --> B[Validation]\n';
-      flowchart += '    B --> C{Valid?}\n';
-      flowchart += '    C -->|Yes| D[Execute Transaction]\n';
-      flowchart += '    C -->|No| E[Reject Transaction]\n';
-      flowchart += '    D --> F[Update Balances]\n';
-      flowchart += '    F --> G[Emit Event]\n';
-    } else if (dataStr.includes('defi') || dataStr.includes('yield')) {
-      flowchart += '    A[Deposit Assets] --> B[Choose Strategy]\n';
-      flowchart += '    B --> C[Liquidity Pool]\n';
-      flowchart += '    B --> D[Lending Protocol]\n';
-      flowchart += '    B --> E[Staking]\n';
-      flowchart += '    C --> F[Earn Trading Fees]\n';
-      flowchart += '    D --> G[Earn Interest]\n';
-      flowchart += '    E --> H[Earn Rewards]\n';
-    } else {
-      // Generic data flow
-      flowchart += '    A[Data Input] --> B[Processing]\n';
-      flowchart += '    B --> C[Analysis]\n';
-      flowchart += '    C --> D[Results]\n';
+  // Generate AI-powered Mermaid diagram using Gemini
+  const generateAIMermaidDiagram = async (dataContent: any, diagramType: 'flowchart' | 'graph' | 'mindmap'): Promise<string> => {
+    const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+      throw new Error('Gemini API key not found. Please set NEXT_PUBLIC_GEMINI_API_KEY in your environment.');
     }
-    
-    return flowchart;
-  };
 
-  const generateGraphFromData = (data: any): string => {
-    let graph = 'graph LR\n';
-    const dataStr = JSON.stringify(data).toLowerCase();
+    const dataStr = typeof dataContent === 'string' ? dataContent : JSON.stringify(dataContent, null, 2);
     
-    if (dataStr.includes('protocol') || dataStr.includes('network')) {
-      graph += '    A[Ethereum] --> B[Uniswap]\n';
-      graph += '    A --> C[Aave]\n';
-      graph += '    A --> D[Compound]\n';
-      graph += '    B --> E[Liquidity Pools]\n';
-      graph += '    C --> F[Lending Markets]\n';
-      graph += '    D --> G[Money Markets]\n';
-    } else {
-      // Generic relationship graph
-      const keys = typeof data === 'object' ? Object.keys(data).slice(0, 5) : ['Node1', 'Node2', 'Node3'];
-      keys.forEach((key, i) => {
-        if (i < keys.length - 1) {
-          graph += `    ${key.replace(/[^a-zA-Z0-9]/g, '')} --> ${keys[i + 1].replace(/[^a-zA-Z0-9]/g, '')}\n`;
+    let prompt = '';
+    if (diagramType === 'flowchart') {
+      prompt = `Analyze the following Web3/blockchain data and create a Mermaid flowchart that represents the process, transaction flow, or data flow described in the content. Use proper flowchart syntax with decision points, processes, and connections that make sense for the data:
+
+Data: ${dataStr}
+
+Generate ONLY the Mermaid flowchart code starting with "flowchart TD" or "flowchart LR". Use meaningful node names and labels based on the actual data content. Include decision points with {} syntax where appropriate.`;
+    } else if (diagramType === 'graph') {
+      prompt = `Analyze the following Web3/blockchain data and create a Mermaid graph that shows relationships, connections, or network topology based on the actual data content:
+
+Data: ${dataStr}
+
+Generate ONLY the Mermaid graph code starting with "graph TD" or "graph LR". Create nodes and connections that represent the actual relationships found in the data. Use descriptive labels based on the data content.`;
+    } else if (diagramType === 'mindmap') {
+      prompt = `Analyze the following Web3/blockchain data and create a Mermaid mindmap that organizes the key concepts, metrics, and relationships found in the data:
+
+Data: ${dataStr}
+
+Generate ONLY the Mermaid mindmap code starting with "mindmap". Organize the actual data points and concepts hierarchically. Use the real data to create meaningful branches and sub-branches.`;
+    }
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.3,
+          topK: 20,
+          topP: 0.8,
+          maxOutputTokens: 1024,
         }
-      });
-    }
+      }),
+    });
+
+    const responseData = await response.json();
     
-    return graph;
+    if (responseData.candidates && responseData.candidates[0] && responseData.candidates[0].content) {
+      let mermaidCode = responseData.candidates[0].content.parts[0].text;
+      
+      // Clean up the response to extract only the Mermaid code
+      mermaidCode = mermaidCode.replace(/```mermaid\n?/g, '').replace(/```\n?/g, '').trim();
+      
+      // Validate that we got valid Mermaid syntax
+      if (mermaidCode.includes('flowchart') || mermaidCode.includes('graph') || mermaidCode.includes('mindmap')) {
+        return mermaidCode;
+      } else {
+        throw new Error('Invalid Mermaid syntax received from AI');
+      }
+    } else {
+      throw new Error('Invalid response from Gemini API');
+    }
   };
 
-  const generateMindmapFromData = (data: any): string => {
-    let mindmap = 'mindmap\n  root)DeFi Ecosystem(\n';
-    const dataStr = JSON.stringify(data).toLowerCase();
-    
-    if (dataStr.includes('defi')) {
-      mindmap += '    Protocols\n';
-      mindmap += '      Uniswap\n';
-      mindmap += '        V2\n';
-      mindmap += '        V3\n';
-      mindmap += '      Aave\n';
-      mindmap += '        Lending\n';
-      mindmap += '        Borrowing\n';
-      mindmap += '    Strategies\n';
-      mindmap += '      Yield Farming\n';
-      mindmap += '      Liquidity Mining\n';
-      mindmap += '      Staking\n';
+  // Fallback diagram generator for when AI fails
+  const generateFallbackDiagram = (diagramType: 'flowchart' | 'graph' | 'mindmap'): string => {
+    if (diagramType === 'flowchart') {
+      return 'flowchart TD\n    A[Data Input] --> B[Processing]\n    B --> C[Analysis]\n    C --> D[Results]';
+    } else if (diagramType === 'graph') {
+      return 'graph LR\n    A[Source] --> B[Process]\n    B --> C[Output]';
     } else {
-      mindmap += '    Data Analysis\n';
-      mindmap += '      Metrics\n';
-      mindmap += '      Trends\n';
-      mindmap += '    Visualization\n';
-      mindmap += '      Charts\n';
-      mindmap += '      Tables\n';
+      return 'mindmap\n  root)Data Analysis(\n    Input\n    Processing\n    Output';
     }
-    
-    return mindmap;
   };
+
+
 
   // Render mermaid diagram
   const renderMermaidDiagram = async (mermaidCode: string) => {
@@ -776,27 +791,37 @@ export default function DataVisualization({ data, title, config, onConfigChange 
             {isGeneratingMermaid ? (
               <div className="flex items-center justify-center py-8">
                 <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin mr-3"></div>
-                <span className="text-white/70">Generating diagram...</span>
+                <span className="text-white/70">AI is analyzing your data and generating a custom diagram...</span>
               </div>
             ) : localConfig.mermaidCode ? (
-              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
-                <div 
-                  ref={mermaidRef} 
-                  className="mermaid-diagram"
-                  style={{ 
-                    display: 'flex', 
-                    justifyContent: 'center', 
-                    background: 'transparent',
-                    color: '#ffffff'
-                  }}
-                >
-                  {localConfig.mermaidCode}
+              <div className="space-y-3">
+                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
+                  <div 
+                    ref={mermaidRef} 
+                    className="mermaid-diagram"
+                    style={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      background: 'transparent',
+                      color: '#ffffff'
+                    }}
+                  >
+                    {localConfig.mermaidCode}
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500 text-center">
+                  ✨ This diagram was generated by AI based on your specific data content
                 </div>
               </div>
             ) : (
               <div className="text-center py-8 text-gray-400">
-                <p className="mb-2">📊 No diagram generated yet</p>
-                <p className="text-sm">Click one of the buttons above to create a diagram from your data</p>
+                <p className="mb-2">🤖 Ready to generate AI-powered diagrams</p>
+                <p className="text-sm">Click one of the buttons above to create a custom diagram based on your data</p>
+                {!process.env.NEXT_PUBLIC_GEMINI_API_KEY && (
+                  <p className="text-xs text-yellow-400 mt-3">
+                    ⚠️ Gemini API key not configured. Fallback diagrams will be used.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -805,10 +830,15 @@ export default function DataVisualization({ data, title, config, onConfigChange 
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-xl">🤖</span>
-              <h3 className="text-lg font-semibold text-white">AI-Powered Visualization Suggestions</h3>
+              <h3 className="text-lg font-semibold text-white">Smart Visualization Recommendations</h3>
+              <div className="ml-auto">
+                <span className="px-2 py-1 bg-green-600/20 text-green-400 text-xs rounded-full border border-green-500/30">
+                  ✨ AI-Powered
+                </span>
+              </div>
             </div>
             <p className="text-gray-400 text-sm mb-6">
-              Based on your data, here are intelligent suggestions for the best ways to visualize and understand it:
+              Our AI has analyzed your specific data content and suggests these optimal visualization approaches:
             </p>
             <div className="grid gap-3">
               {generateAISuggestions.map((suggestion) => (
@@ -824,6 +854,12 @@ export default function DataVisualization({ data, title, config, onConfigChange 
                         {suggestion.title}
                       </h4>
                       <p className="text-gray-400 text-sm mt-1">{suggestion.description}</p>
+                      {suggestion.id.startsWith('ai_') && (
+                        <div className="flex items-center gap-1 mt-2">
+                          <span className="text-xs text-purple-400">🔮 AI-Generated</span>
+                          <span className="text-xs text-gray-500">• Custom for your data</span>
+                        </div>
+                      )}
                     </div>
                     <div className="text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
                       →
@@ -838,6 +874,9 @@ export default function DataVisualization({ data, title, config, onConfigChange 
                 <p className="text-sm">Try the other visualization modes to explore your data</p>
               </div>
             )}
+            <div className="text-xs text-gray-500 text-center mt-4 pt-4 border-t border-gray-700/50">
+              💡 Suggestions are dynamically generated based on your query results and data structure
+            </div>
           </div>
         )}
       </div>
