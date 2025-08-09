@@ -4,9 +4,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import DataVisualization from '../components/DataVisualization';
+import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { WavyBackground } from '../../components/ui/wavy-background';
+import GeminiAIAssistant from '../components/GeminiAIAssistant';
 
 
 interface ResearchResult {
@@ -72,6 +73,71 @@ export default function MainChat() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const endOfChatRef = useRef<HTMLDivElement>(null);
   const hasUserMessage = messages.some((m) => m.role === 'user');
+  const [vizConfigs, setVizConfigs] = useState<Record<string, VisualizationConfig>>({});
+
+  const latestAssistantMsg = messages
+    .slice()
+    .reverse()
+    .find(m => m.role === 'assistant' && m.result && m.result.success && m.result.data);
+
+  const getArrayCandidates = (obj: any) => {
+    const results: { path: string; items: any[] }[] = [];
+    const visit = (node: any, path: string) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        if (node.length > 0 && typeof node[0] === 'object') results.push({ path, items: node });
+        return;
+      }
+      for (const [k, v] of Object.entries(node)) visit(v, path ? `${path}.${k}` : k);
+    };
+    visit(obj, '');
+    return results;
+  };
+
+  const handleAssistantSuggestion = (suggestion: string) => {
+    if (!latestAssistantMsg?.id || !latestAssistantMsg?.result?.data) return;
+    const dataObj = latestAssistantMsg.result.data;
+    const lower = suggestion.toLowerCase();
+
+    let mode: VisualizationConfig['mode'] = 'formatted';
+    if (/(chart|line|bar|area|pie)/i.test(lower)) mode = 'chart';
+    else if (/table/i.test(lower)) mode = 'table';
+    else if (/json/i.test(lower)) mode = 'json';
+    else if (/(metric|kpi|summary)/i.test(lower)) mode = 'metrics';
+
+    let chartType: VisualizationConfig['chartType'] = undefined;
+    if (/line/i.test(lower)) chartType = 'line';
+    else if (/bar/i.test(lower)) chartType = 'bar';
+    else if (/area/i.test(lower)) chartType = 'area';
+    else if (/pie/i.test(lower)) chartType = 'pie';
+
+    const arrays = getArrayCandidates(dataObj);
+    const chosenArray = arrays[0];
+    let xKey: string | undefined;
+    let yKey: string | undefined;
+    if (chosenArray?.items?.[0]) {
+      const first: any = chosenArray.items[0];
+      const keys = Object.keys(first);
+      const numericKeys = keys.filter(k => typeof first[k] === 'number');
+      const timeKeys = keys.filter(k => {
+        const val: any = first[k];
+        if (typeof val === 'number') return /time|timestamp|block/i.test(k);
+        if (typeof val === 'string') return /time|date|timestamp/i.test(k) || !isNaN(Date.parse(val));
+        return false;
+      });
+      xKey = timeKeys[0] ?? keys[0];
+      yKey = numericKeys[0] ?? keys.find(k => typeof first[k] === 'number');
+    }
+
+    const nextCfg: VisualizationConfig = {
+      mode,
+      chartType,
+      datasetPath: chosenArray?.path,
+      xKey,
+      yKey,
+    };
+    setVizConfigs(prev => ({ ...prev, [latestAssistantMsg.id]: nextCfg }));
+  };
 
   // Check API health on component mount
   useEffect(() => {
@@ -346,8 +412,13 @@ export default function MainChat() {
                       {/* Visualization */}
                       {m.result.success && m.result.data ? (
                         <div className="rounded-xl border border-white/20 p-3 comic-inner">
-                          <DataVisualization data={m.result.data} title="Research Results" />
-              </div>
+                          <DataVisualization
+                            data={m.result.data}
+                            title="Research Results"
+                            config={vizConfigs[m.id]}
+                            onConfigChange={(cfg) => setVizConfigs(prev => ({ ...prev, [m.id]: cfg }))}
+                          />
+                        </div>
                       ) : m.result.error ? (
                         <pre className="text-xs text-red-300 whitespace-pre-wrap border border-red-400/30 rounded-xl p-3 bg-red-900/10">{m.result.error}</pre>
                       ) : null}
@@ -500,6 +571,10 @@ export default function MainChat() {
             </button>
           </div>
         </div>
+        <GeminiAIAssistant
+          researchData={latestAssistantMsg?.result?.data}
+          onSuggestionSelect={handleAssistantSuggestion}
+        />
       </main>
       )}
     </div>

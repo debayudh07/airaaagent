@@ -101,6 +101,8 @@ Please provide a concise, actionable response in a friendly, professional tone.`
     
     const input = chatInput.trim();
     setChatInput('');
+    // emit to parent so it can adjust visualization immediately
+    try { onSuggestionSelect(input); } catch {}
     await callGeminiAPI(input);
   };
 
@@ -136,7 +138,7 @@ Please provide a concise, actionable response in a friendly, professional tone.`
                 {suggestions.slice(0, 3).map((suggestion, index) => (
                   <button
                     key={index}
-                    onClick={() => callGeminiAPI(suggestion)}
+                    onClick={() => { try { onSuggestionSelect(suggestion); } catch {}; callGeminiAPI(suggestion); }}
                     className="w-full text-left px-2 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/40 rounded text-gray-300 transition-all duration-200"
                   >
                     {suggestion}
