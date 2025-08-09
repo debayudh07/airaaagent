@@ -50,6 +50,7 @@ export default function DataVisualization({ data, title, config, onConfigChange 
   const [localConfig, setLocalConfig] = useState<VisualizationConfig>({ mode: 'formatted' });
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
   const [isGeneratingMermaid, setIsGeneratingMermaid] = useState(false);
+  const [lastGeneratedCode, setLastGeneratedCode] = useState<string>('');
   const mermaidRef = useRef<HTMLDivElement>(null);
 
   // Initialize mermaid
@@ -188,11 +189,13 @@ export default function DataVisualization({ data, title, config, onConfigChange 
     setIsGeneratingMermaid(true);
     try {
       const mermaidCode = await generateAIMermaidDiagram(data, diagramType);
+      setLastGeneratedCode(mermaidCode);
       setConfig({ ...localConfig, mode: 'mermaid', mermaidCode });
     } catch (error) {
       console.error('Error generating mermaid diagram:', error);
       // Fallback to basic diagram if AI generation fails
       const fallbackCode = generateFallbackDiagram(diagramType);
+      setLastGeneratedCode(fallbackCode);
       setConfig({ ...localConfig, mode: 'mermaid', mermaidCode: fallbackCode });
     } finally {
       setIsGeneratingMermaid(false);
@@ -210,23 +213,61 @@ export default function DataVisualization({ data, title, config, onConfigChange 
     
     let prompt = '';
     if (diagramType === 'flowchart') {
-      prompt = `Analyze the following Web3/blockchain data and create a Mermaid flowchart that represents the process, transaction flow, or data flow described in the content. Use proper flowchart syntax with decision points, processes, and connections that make sense for the data:
+      prompt = `Analyze the following Web3/blockchain data and create a Mermaid flowchart. 
 
 Data: ${dataStr}
 
-Generate ONLY the Mermaid flowchart code starting with "flowchart TD" or "flowchart LR". Use meaningful node names and labels based on the actual data content. Include decision points with {} syntax where appropriate.`;
+Requirements:
+- Start with exactly "flowchart TD"
+- Use simple node names (A, B, C, etc.) with descriptive labels in brackets
+- Include decision points with curly braces {} where appropriate
+- Use arrow connections (-->)
+- Keep labels concise and relevant to the data
+- Generate ONLY valid Mermaid syntax, no explanatory text
+
+Example format:
+flowchart TD
+    A[Start Process] --> B{Decision Point}
+    B -->|Yes| C[Action 1]
+    B -->|No| D[Action 2]`;
+
     } else if (diagramType === 'graph') {
-      prompt = `Analyze the following Web3/blockchain data and create a Mermaid graph that shows relationships, connections, or network topology based on the actual data content:
+      prompt = `Analyze the following Web3/blockchain data and create a Mermaid graph showing relationships.
 
 Data: ${dataStr}
 
-Generate ONLY the Mermaid graph code starting with "graph TD" or "graph LR". Create nodes and connections that represent the actual relationships found in the data. Use descriptive labels based on the data content.`;
+Requirements:
+- Start with exactly "graph LR" or "graph TD"
+- Use simple node identifiers (A, B, C, etc.) with labels in brackets
+- Show connections with --> arrows
+- Keep labels descriptive but concise
+- Generate ONLY valid Mermaid syntax, no explanatory text
+
+Example format:
+graph LR
+    A[Entity 1] --> B[Entity 2]
+    B --> C[Entity 3]`;
+
     } else if (diagramType === 'mindmap') {
-      prompt = `Analyze the following Web3/blockchain data and create a Mermaid mindmap that organizes the key concepts, metrics, and relationships found in the data:
+      prompt = `Analyze the following Web3/blockchain data and create a Mermaid mindmap.
 
 Data: ${dataStr}
 
-Generate ONLY the Mermaid mindmap code starting with "mindmap". Organize the actual data points and concepts hierarchically. Use the real data to create meaningful branches and sub-branches.`;
+Requirements:
+- Start with exactly "mindmap"
+- Use proper indentation (2 spaces per level)
+- Organize concepts hierarchically
+- Keep branch names concise
+- Generate ONLY valid Mermaid syntax, no explanatory text
+
+Example format:
+mindmap
+  root)Main Topic(
+    Branch 1
+      Sub-item 1
+      Sub-item 2
+    Branch 2
+      Sub-item 3`;
     }
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
@@ -257,12 +298,38 @@ Generate ONLY the Mermaid mindmap code starting with "mindmap". Organize the act
       // Clean up the response to extract only the Mermaid code
       mermaidCode = mermaidCode.replace(/```mermaid\n?/g, '').replace(/```\n?/g, '').trim();
       
-      // Validate that we got valid Mermaid syntax
-      if (mermaidCode.includes('flowchart') || mermaidCode.includes('graph') || mermaidCode.includes('mindmap')) {
-        return mermaidCode;
-      } else {
-        throw new Error('Invalid Mermaid syntax received from AI');
+      // Additional cleanup - remove any extra text before/after the diagram
+      const lines = mermaidCode.split('\n');
+      let startIndex = -1;
+      let endIndex = lines.length;
+      
+      // Find the start of the actual diagram
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim().match(/^(flowchart|graph|mindmap)/)) {
+          startIndex = i;
+          break;
+        }
       }
+      
+      if (startIndex === -1) {
+        throw new Error('No valid Mermaid diagram found in AI response');
+      }
+      
+      // Extract the diagram code
+      const diagramLines = lines.slice(startIndex, endIndex);
+      mermaidCode = diagramLines.join('\n').trim();
+      
+      // Basic validation
+      if (!mermaidCode || mermaidCode.length < 10) {
+        throw new Error('Generated diagram code is too short or empty');
+      }
+      
+      // Validate syntax start
+      if (!mermaidCode.match(/^(flowchart|graph|mindmap)/)) {
+        throw new Error('Invalid Mermaid syntax - diagram must start with flowchart, graph, or mindmap');
+      }
+      
+      return mermaidCode;
     } else {
       throw new Error('Invalid response from Gemini API');
     }
@@ -271,11 +338,34 @@ Generate ONLY the Mermaid mindmap code starting with "mindmap". Organize the act
   // Fallback diagram generator for when AI fails
   const generateFallbackDiagram = (diagramType: 'flowchart' | 'graph' | 'mindmap'): string => {
     if (diagramType === 'flowchart') {
-      return 'flowchart TD\n    A[Data Input] --> B[Processing]\n    B --> C[Analysis]\n    C --> D[Results]';
+      return `flowchart TD
+    A[Data Input] --> B[Processing]
+    B --> C{Valid Data?}
+    C -->|Yes| D[Analysis]
+    C -->|No| E[Error Handling]
+    D --> F[Results]
+    E --> A`;
     } else if (diagramType === 'graph') {
-      return 'graph LR\n    A[Source] --> B[Process]\n    B --> C[Output]';
+      return `graph LR
+    A[Data Source] --> B[API Processing]
+    B --> C[Blockchain Data]
+    C --> D[Visualization]
+    D --> E[User Interface]`;
     } else {
-      return 'mindmap\n  root)Data Analysis(\n    Input\n    Processing\n    Output';
+      return `mindmap
+  root)Data Analysis(
+    Input Sources
+      API Data
+      Blockchain
+      User Queries
+    Processing
+      Validation
+      Analysis
+      Formatting
+    Output
+      Charts
+      Tables
+      Diagrams`;
     }
   };
 
@@ -287,14 +377,34 @@ Generate ONLY the Mermaid mindmap code starting with "mindmap". Organize the act
 
     try {
       const element = mermaidRef.current;
-      element.innerHTML = mermaidCode;
-      await mermaid.run({
-        querySelector: '.mermaid-diagram'
-      });
+      
+      // Clear previous content
+      element.innerHTML = '';
+      
+      // Create a unique ID for this diagram
+      const diagramId = `mermaid-${Date.now()}`;
+      
+      // Validate and clean the mermaid code
+      const cleanCode = mermaidCode.trim();
+      if (!cleanCode) {
+        throw new Error('Empty diagram code');
+      }
+      
+      // Generate the diagram using mermaid render method
+      const { svg } = await mermaid.render(diagramId, cleanCode);
+      element.innerHTML = svg;
+      
     } catch (error) {
       console.error('Error rendering mermaid diagram:', error);
       if (mermaidRef.current) {
-        mermaidRef.current.innerHTML = `<div class="text-red-400">Error rendering diagram: ${error}</div>`;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        mermaidRef.current.innerHTML = `
+          <div class="text-red-400 p-4 border border-red-400/30 rounded-lg bg-red-900/10">
+            <div class="font-semibold mb-2">❌ Diagram Rendering Error</div>
+            <div class="text-sm">${errorMessage}</div>
+            <div class="text-xs mt-2 text-red-300">Try generating a different diagram type or check the data content.</div>
+          </div>
+        `;
       }
     }
   };
@@ -812,6 +922,16 @@ Generate ONLY the Mermaid mindmap code starting with "mindmap". Organize the act
                 <div className="text-xs text-gray-500 text-center">
                   ✨ This diagram was generated by AI based on your specific data content
                 </div>
+                {lastGeneratedCode && (
+                  <details className="mt-3">
+                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+                      🔍 View Generated Code
+                    </summary>
+                    <pre className="text-xs text-gray-400 mt-2 p-2 bg-gray-800/50 rounded border border-gray-600/30 overflow-x-auto">
+                      {lastGeneratedCode}
+                    </pre>
+                  </details>
+                )}
               </div>
             ) : (
               <div className="text-center py-8 text-gray-400">
