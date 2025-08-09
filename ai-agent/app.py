@@ -11,7 +11,23 @@ from main import OptimizedWeb3ResearchAgent, ResearchRequest, init_http_client, 
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    CORS(app)
+
+    # Configure CORS explicitly for API routes
+    allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+    allowed_origins = (
+        "*"
+        if allowed_origins_env.strip() == "*"
+        else [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+    )
+
+    CORS(
+        app,
+        resources={r"/api/*": {
+            "origins": allowed_origins,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }},
+    )
 
     # Initialize shared HTTP client once for all requests
     try:

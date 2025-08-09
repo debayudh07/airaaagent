@@ -2,6 +2,7 @@
 httpx==0.25.2
 flask==3.0.3
 flask-cors==4.0.1
+gunicorn==21.2.0
 
 # LangChain dependencies - using more stable versions
 langchain==0.2.16
