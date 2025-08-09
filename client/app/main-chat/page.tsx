@@ -92,7 +92,7 @@ export default function MainChat() {
 
   const checkApiHealth = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/health');
+      const response = await fetch('https://airaaagent.onrender.com/api/health');
       const data = await response.json();
       setApiStats(prev => ({ ...prev, isOnline: data.status === 'ok' }));
     } catch (error) {
@@ -118,7 +118,7 @@ export default function MainChat() {
     const startTime = Date.now();
 
     try {
-      const response = await fetch('http://localhost:8000/api/research', {
+      const response = await fetch('https://airaaagent.onrender.com/api/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
