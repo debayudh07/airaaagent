@@ -1,7 +1,7 @@
 /* eslint-disable */
 "use client";
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 
 interface DataVisualizationProps {
   data: any;
@@ -11,7 +11,7 @@ interface DataVisualizationProps {
 export default function DataVisualization({ data, title }: DataVisualizationProps) {
   const [viewMode, setViewMode] = useState<'formatted' | 'table' | 'json'>('formatted');
 
-  const renderFormattedData = (obj: any, depth = 0): JSX.Element => {
+  const renderFormattedData = (obj: any, depth = 0): React.JSX.Element => {
     if (typeof obj === 'string') {
       // Check if it's a markdown-like formatted research response
       if (obj.includes('**') || obj.includes('🔍') || obj.includes('📊')) {
@@ -81,7 +81,7 @@ export default function DataVisualization({ data, title }: DataVisualizationProp
     );
   };
 
-  const renderTable = (obj: any): JSX.Element => {
+  const renderTable = (obj: any): React.JSX.Element => {
     if (typeof obj === 'string') {
       // Try to extract tabular data from formatted text
       const lines = obj.split('\n').filter(line => line.trim());
