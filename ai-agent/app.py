@@ -29,7 +29,23 @@ def create_app() -> Flask:
         send_wildcard=True,
         vary_header=True,
         max_age=3600,
+        always_send=True,
     )
+
+    @app.after_request
+    def ensure_cors_headers(response):
+        origin = request.headers.get("Origin")
+        # Normalize allowed origins check
+        is_wildcard = allowed_origins == "*"
+        is_allowed = is_wildcard or (isinstance(allowed_origins, list) and origin in allowed_origins)
+
+        if origin and is_allowed:
+            response.headers["Access-Control-Allow-Origin"] = "*" if is_wildcard else origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            # Do not set Allow-Credentials since we aren't using credentials
+        return response
 
     @app.after_request
     def ensure_cors_headers(response):
