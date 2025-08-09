@@ -1,7 +1,7 @@
 /* eslint-disable */
 "use client";
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -19,14 +19,24 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
+import mermaid from 'mermaid';
 
 export type ChartType = 'line' | 'bar' | 'area' | 'pie';
 export interface VisualizationConfig {
-  mode: 'formatted' | 'table' | 'json' | 'chart' | 'metrics';
+  mode: 'formatted' | 'table' | 'json' | 'chart' | 'metrics' | 'mermaid' | 'ai_suggestions';
   chartType?: ChartType;
   datasetPath?: string; // JSON path to the array used for charting
   xKey?: string;
   yKey?: string;
+  mermaidCode?: string; // Generated mermaid diagram code
+}
+
+interface AISuggestion {
+  id: string;
+  title: string;
+  description: string;
+  action: () => void;
+  icon: string;
 }
 
 interface DataVisualizationProps {
@@ -38,6 +48,38 @@ interface DataVisualizationProps {
 
 export default function DataVisualization({ data, title, config, onConfigChange }: DataVisualizationProps) {
   const [localConfig, setLocalConfig] = useState<VisualizationConfig>({ mode: 'formatted' });
+  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
+  const [isGeneratingMermaid, setIsGeneratingMermaid] = useState(false);
+  const mermaidRef = useRef<HTMLDivElement>(null);
+
+  // Initialize mermaid
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#22d3ee',
+        primaryTextColor: '#ffffff',
+        primaryBorderColor: '#0ea5e9',
+        lineColor: '#64748b',
+        sectionBkgColor: '#1e293b',
+        altSectionBkgColor: '#334155',
+        textColor: '#ffffff',
+        taskBkgColor: '#1e293b',
+        taskTextColor: '#ffffff',
+        taskTextLightColor: '#94a3b8',
+        taskTextOutsideColor: '#94a3b8',
+        taskTextClickableColor: '#22d3ee',
+        activeTaskBkgColor: '#0ea5e9',
+        activeTaskBorderColor: '#0284c7',
+        gridColor: '#475569',
+        section0: '#1e293b',
+        section1: '#334155',
+        section2: '#475569',
+        section3: '#64748b'
+      }
+    });
+  }, []);
 
   // keep localConfig in sync with external config if provided
   useEffect(() => {
@@ -51,6 +93,203 @@ export default function DataVisualization({ data, title, config, onConfigChange 
       return next;
     });
   };
+
+  // Generate AI suggestions based on data analysis
+  const generateAISuggestions = useMemo((): AISuggestion[] => {
+    if (!data) return [];
+
+    const suggestions: AISuggestion[] = [];
+    const dataStr = JSON.stringify(data).toLowerCase();
+
+    // Analyze data structure and content to suggest appropriate visualizations
+    if (Array.isArray(data) || (typeof data === 'object' && Object.values(data).some(v => Array.isArray(v)))) {
+      suggestions.push({
+        id: 'chart_time_series',
+        title: 'Time Series Chart',
+        description: 'Visualize trends over time with an interactive line chart',
+        icon: '📈',
+        action: () => setConfig({ ...localConfig, mode: 'chart', chartType: 'line' })
+      });
+
+      suggestions.push({
+        id: 'metrics_summary',
+        title: 'Key Metrics',
+        description: 'Display important statistics and KPIs in a dashboard format',
+        icon: '📊',
+        action: () => setConfig({ ...localConfig, mode: 'metrics' })
+      });
+    }
+
+    // Suggest mermaid diagrams for specific data types
+    if (dataStr.includes('transaction') || dataStr.includes('flow') || dataStr.includes('process')) {
+      suggestions.push({
+        id: 'process_flow',
+        title: 'Process Flow Diagram',
+        description: 'Create a flowchart showing transaction or process flows',
+        icon: '🔄',
+        action: () => generateMermaidDiagram('flowchart')
+      });
+    }
+
+    if (dataStr.includes('protocol') || dataStr.includes('network') || dataStr.includes('node')) {
+      suggestions.push({
+        id: 'network_diagram',
+        title: 'Network Architecture',
+        description: 'Visualize network connections and protocol relationships',
+        icon: '🌐',
+        action: () => generateMermaidDiagram('graph')
+      });
+    }
+
+    if (dataStr.includes('defi') || dataStr.includes('yield') || dataStr.includes('staking')) {
+      suggestions.push({
+        id: 'defi_strategy',
+        title: 'DeFi Strategy Map',
+        description: 'Map out DeFi protocols and yield strategies',
+        icon: '🏦',
+        action: () => generateMermaidDiagram('mindmap')
+      });
+    }
+
+    suggestions.push({
+      id: 'table_view',
+      title: 'Data Table',
+      description: 'View all data in a structured table format',
+      icon: '📋',
+      action: () => setConfig({ ...localConfig, mode: 'table' })
+    });
+
+    return suggestions;
+  }, [data, localConfig]);
+
+  // Generate Mermaid diagram based on data content
+  const generateMermaidDiagram = async (diagramType: 'flowchart' | 'graph' | 'mindmap') => {
+    setIsGeneratingMermaid(true);
+    try {
+      let mermaidCode = '';
+      
+      if (diagramType === 'flowchart') {
+        mermaidCode = generateFlowchartFromData(data);
+      } else if (diagramType === 'graph') {
+        mermaidCode = generateGraphFromData(data);
+      } else if (diagramType === 'mindmap') {
+        mermaidCode = generateMindmapFromData(data);
+      }
+
+      setConfig({ ...localConfig, mode: 'mermaid', mermaidCode });
+    } catch (error) {
+      console.error('Error generating mermaid diagram:', error);
+    } finally {
+      setIsGeneratingMermaid(false);
+    }
+  };
+
+  // Helper functions to generate different types of mermaid diagrams
+  const generateFlowchartFromData = (data: any): string => {
+    let flowchart = 'flowchart TD\n';
+    const dataStr = JSON.stringify(data).toLowerCase();
+    
+    if (dataStr.includes('transaction')) {
+      flowchart += '    A[User Initiates Transaction] --> B[Validation]\n';
+      flowchart += '    B --> C{Valid?}\n';
+      flowchart += '    C -->|Yes| D[Execute Transaction]\n';
+      flowchart += '    C -->|No| E[Reject Transaction]\n';
+      flowchart += '    D --> F[Update Balances]\n';
+      flowchart += '    F --> G[Emit Event]\n';
+    } else if (dataStr.includes('defi') || dataStr.includes('yield')) {
+      flowchart += '    A[Deposit Assets] --> B[Choose Strategy]\n';
+      flowchart += '    B --> C[Liquidity Pool]\n';
+      flowchart += '    B --> D[Lending Protocol]\n';
+      flowchart += '    B --> E[Staking]\n';
+      flowchart += '    C --> F[Earn Trading Fees]\n';
+      flowchart += '    D --> G[Earn Interest]\n';
+      flowchart += '    E --> H[Earn Rewards]\n';
+    } else {
+      // Generic data flow
+      flowchart += '    A[Data Input] --> B[Processing]\n';
+      flowchart += '    B --> C[Analysis]\n';
+      flowchart += '    C --> D[Results]\n';
+    }
+    
+    return flowchart;
+  };
+
+  const generateGraphFromData = (data: any): string => {
+    let graph = 'graph LR\n';
+    const dataStr = JSON.stringify(data).toLowerCase();
+    
+    if (dataStr.includes('protocol') || dataStr.includes('network')) {
+      graph += '    A[Ethereum] --> B[Uniswap]\n';
+      graph += '    A --> C[Aave]\n';
+      graph += '    A --> D[Compound]\n';
+      graph += '    B --> E[Liquidity Pools]\n';
+      graph += '    C --> F[Lending Markets]\n';
+      graph += '    D --> G[Money Markets]\n';
+    } else {
+      // Generic relationship graph
+      const keys = typeof data === 'object' ? Object.keys(data).slice(0, 5) : ['Node1', 'Node2', 'Node3'];
+      keys.forEach((key, i) => {
+        if (i < keys.length - 1) {
+          graph += `    ${key.replace(/[^a-zA-Z0-9]/g, '')} --> ${keys[i + 1].replace(/[^a-zA-Z0-9]/g, '')}\n`;
+        }
+      });
+    }
+    
+    return graph;
+  };
+
+  const generateMindmapFromData = (data: any): string => {
+    let mindmap = 'mindmap\n  root)DeFi Ecosystem(\n';
+    const dataStr = JSON.stringify(data).toLowerCase();
+    
+    if (dataStr.includes('defi')) {
+      mindmap += '    Protocols\n';
+      mindmap += '      Uniswap\n';
+      mindmap += '        V2\n';
+      mindmap += '        V3\n';
+      mindmap += '      Aave\n';
+      mindmap += '        Lending\n';
+      mindmap += '        Borrowing\n';
+      mindmap += '    Strategies\n';
+      mindmap += '      Yield Farming\n';
+      mindmap += '      Liquidity Mining\n';
+      mindmap += '      Staking\n';
+    } else {
+      mindmap += '    Data Analysis\n';
+      mindmap += '      Metrics\n';
+      mindmap += '      Trends\n';
+      mindmap += '    Visualization\n';
+      mindmap += '      Charts\n';
+      mindmap += '      Tables\n';
+    }
+    
+    return mindmap;
+  };
+
+  // Render mermaid diagram
+  const renderMermaidDiagram = async (mermaidCode: string) => {
+    if (!mermaidRef.current || !mermaidCode) return;
+
+    try {
+      const element = mermaidRef.current;
+      element.innerHTML = mermaidCode;
+      await mermaid.run({
+        querySelector: '.mermaid-diagram'
+      });
+    } catch (error) {
+      console.error('Error rendering mermaid diagram:', error);
+      if (mermaidRef.current) {
+        mermaidRef.current.innerHTML = `<div class="text-red-400">Error rendering diagram: ${error}</div>`;
+      }
+    }
+  };
+
+  // Re-render mermaid when code changes
+  useEffect(() => {
+    if (localConfig.mode === 'mermaid' && localConfig.mermaidCode) {
+      renderMermaidDiagram(localConfig.mermaidCode);
+    }
+  }, [localConfig.mode, localConfig.mermaidCode]);
 
   const viewMode = localConfig.mode ?? 'formatted';
 
@@ -433,6 +672,27 @@ export default function DataVisualization({ data, title, config, onConfigChange 
           🧮 Metrics
         </button>
         <button
+          onClick={() => setConfig({ ...localConfig, mode: 'mermaid' })}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+            viewMode === 'mermaid'
+              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
+              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
+          }`}
+          disabled={isGeneratingMermaid}
+        >
+          🧩 Diagram
+        </button>
+        <button
+          onClick={() => setConfig({ ...localConfig, mode: 'ai_suggestions' })}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+            viewMode === 'ai_suggestions'
+              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
+              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
+          }`}
+        >
+          🤖 AI Suggestions
+        </button>
+        <button
           onClick={() => setConfig({ ...localConfig, mode: 'json' })}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
             viewMode === 'json'
@@ -485,6 +745,101 @@ export default function DataVisualization({ data, title, config, onConfigChange 
           </div>
         )}
         {viewMode === 'metrics' && renderMetrics()}
+        {viewMode === 'mermaid' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Interactive Diagram</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => generateMermaidDiagram('flowchart')}
+                  className="px-3 py-1.5 bg-blue-600/30 hover:bg-blue-600/50 rounded-lg text-sm border border-blue-500/50 text-blue-300"
+                  disabled={isGeneratingMermaid}
+                >
+                  🔄 Flowchart
+                </button>
+                <button
+                  onClick={() => generateMermaidDiagram('graph')}
+                  className="px-3 py-1.5 bg-green-600/30 hover:bg-green-600/50 rounded-lg text-sm border border-green-500/50 text-green-300"
+                  disabled={isGeneratingMermaid}
+                >
+                  🌐 Network
+                </button>
+                <button
+                  onClick={() => generateMermaidDiagram('mindmap')}
+                  className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 rounded-lg text-sm border border-purple-500/50 text-purple-300"
+                  disabled={isGeneratingMermaid}
+                >
+                  🧠 Mindmap
+                </button>
+              </div>
+            </div>
+            {isGeneratingMermaid ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin mr-3"></div>
+                <span className="text-white/70">Generating diagram...</span>
+              </div>
+            ) : localConfig.mermaidCode ? (
+              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
+                <div 
+                  ref={mermaidRef} 
+                  className="mermaid-diagram"
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    background: 'transparent',
+                    color: '#ffffff'
+                  }}
+                >
+                  {localConfig.mermaidCode}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                <p className="mb-2">📊 No diagram generated yet</p>
+                <p className="text-sm">Click one of the buttons above to create a diagram from your data</p>
+              </div>
+            )}
+          </div>
+        )}
+        {viewMode === 'ai_suggestions' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xl">🤖</span>
+              <h3 className="text-lg font-semibold text-white">AI-Powered Visualization Suggestions</h3>
+            </div>
+            <p className="text-gray-400 text-sm mb-6">
+              Based on your data, here are intelligent suggestions for the best ways to visualize and understand it:
+            </p>
+            <div className="grid gap-3">
+              {generateAISuggestions.map((suggestion) => (
+                <div
+                  key={suggestion.id}
+                  className="group rounded-xl border border-gray-600/50 bg-gray-800/30 hover:bg-gray-700/40 hover:border-cyan-500/50 transition-all duration-300 p-4 cursor-pointer"
+                  onClick={suggestion.action}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl flex-shrink-0">{suggestion.icon}</span>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-white group-hover:text-cyan-300 transition-colors">
+                        {suggestion.title}
+                      </h4>
+                      <p className="text-gray-400 text-sm mt-1">{suggestion.description}</p>
+                    </div>
+                    <div className="text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                      →
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {generateAISuggestions.length === 0 && (
+              <div className="text-center py-8 text-gray-400">
+                <p className="mb-2">🤔 No specific suggestions available</p>
+                <p className="text-sm">Try the other visualization modes to explore your data</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
