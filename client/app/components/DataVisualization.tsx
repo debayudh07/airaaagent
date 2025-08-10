@@ -19,16 +19,14 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import mermaid from 'mermaid';
 
 export type ChartType = 'line' | 'bar' | 'area' | 'pie';
 export interface VisualizationConfig {
-  mode: 'formatted' | 'table' | 'json' | 'chart' | 'metrics' | 'mermaid' | 'ai_suggestions';
+  mode: 'formatted' | 'table' | 'json' | 'chart' | 'metrics' | 'ai_suggestions';
   chartType?: ChartType;
   datasetPath?: string; // JSON path to the array used for charting
   xKey?: string;
   yKey?: string;
-  mermaidCode?: string; // Generated mermaid diagram code
 }
 
 interface AISuggestion {
@@ -49,38 +47,8 @@ interface DataVisualizationProps {
 export default function DataVisualization({ data, title, config, onConfigChange }: DataVisualizationProps) {
   const [localConfig, setLocalConfig] = useState<VisualizationConfig>({ mode: 'formatted' });
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
-  const [isGeneratingMermaid, setIsGeneratingMermaid] = useState(false);
-  const [lastGeneratedCode, setLastGeneratedCode] = useState<string>('');
-  const mermaidRef = useRef<HTMLDivElement>(null);
 
-  // Initialize mermaid
-  useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      themeVariables: {
-        primaryColor: '#22d3ee',
-        primaryTextColor: '#ffffff',
-        primaryBorderColor: '#0ea5e9',
-        lineColor: '#64748b',
-        sectionBkgColor: '#1e293b',
-        altSectionBkgColor: '#334155',
-        textColor: '#ffffff',
-        taskBkgColor: '#1e293b',
-        taskTextColor: '#ffffff',
-        taskTextLightColor: '#94a3b8',
-        taskTextOutsideColor: '#94a3b8',
-        taskTextClickableColor: '#22d3ee',
-        activeTaskBkgColor: '#0ea5e9',
-        activeTaskBorderColor: '#0284c7',
-        gridColor: '#475569',
-        section0: '#1e293b',
-        section1: '#334155',
-        section2: '#475569',
-        section3: '#64748b'
-      }
-    });
-  }, []);
+
 
   // keep localConfig in sync with external config if provided
   useEffect(() => {
@@ -136,285 +104,22 @@ export default function DataVisualization({ data, title, config, onConfigChange 
       });
     }
 
-    // AI-powered diagram suggestions based on data content
-    const dataStr = JSON.stringify(data);
-    
-    // Suggest flowcharts for process-oriented data
-    if (dataStr.toLowerCase().includes('transaction') || 
-        dataStr.toLowerCase().includes('flow') || 
-        dataStr.toLowerCase().includes('process') ||
-        dataStr.toLowerCase().includes('step')) {
-      basicSuggestions.push({
-        id: 'ai_flowchart',
-        title: 'AI Process Flowchart',
-        description: 'Dynamic flowchart generated from your specific data patterns',
-        icon: '🔄',
-        action: () => generateMermaidDiagram('flowchart')
-      });
-    }
 
-    // Suggest network diagrams for relationship data
-    if (dataStr.toLowerCase().includes('protocol') || 
-        dataStr.toLowerCase().includes('network') || 
-        dataStr.toLowerCase().includes('connection') ||
-        dataStr.toLowerCase().includes('relationship')) {
-      basicSuggestions.push({
-        id: 'ai_network',
-        title: 'AI Network Diagram',
-        description: 'Intelligent network visualization based on your data relationships',
-        icon: '🌐',
-        action: () => generateMermaidDiagram('graph')
-      });
-    }
-
-    // Suggest mindmaps for hierarchical or concept data
-    if (dataStr.toLowerCase().includes('defi') || 
-        dataStr.toLowerCase().includes('ecosystem') || 
-        dataStr.toLowerCase().includes('category') ||
-        Object.keys(data).length > 3) {
-      basicSuggestions.push({
-        id: 'ai_mindmap',
-        title: 'AI Concept Map',
-        description: 'Intelligent mindmap organizing your data concepts and relationships',
-        icon: '🧠',
-        action: () => generateMermaidDiagram('mindmap')
-      });
-    }
 
     return basicSuggestions;
   }, [data, localConfig]);
 
-  // Generate Mermaid diagram using Gemini AI based on actual data content
-  const generateMermaidDiagram = async (diagramType: 'flowchart' | 'graph' | 'mindmap') => {
-    setIsGeneratingMermaid(true);
-    try {
-      const mermaidCode = await generateAIMermaidDiagram(data, diagramType);
-      setLastGeneratedCode(mermaidCode);
-      setConfig({ ...localConfig, mode: 'mermaid', mermaidCode });
-    } catch (error) {
-      console.error('Error generating mermaid diagram:', error);
-      // Fallback to basic diagram if AI generation fails
-      const fallbackCode = generateFallbackDiagram(diagramType);
-      setLastGeneratedCode(fallbackCode);
-      setConfig({ ...localConfig, mode: 'mermaid', mermaidCode: fallbackCode });
-    } finally {
-      setIsGeneratingMermaid(false);
-    }
-  };
-
-  // Generate AI-powered Mermaid diagram using Gemini
-  const generateAIMermaidDiagram = async (dataContent: any, diagramType: 'flowchart' | 'graph' | 'mindmap'): Promise<string> => {
-    const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API key not found. Please set NEXT_PUBLIC_GEMINI_API_KEY in your environment.');
-    }
-
-    const dataStr = typeof dataContent === 'string' ? dataContent : JSON.stringify(dataContent, null, 2);
-    
-    let prompt = '';
-    if (diagramType === 'flowchart') {
-      prompt = `Analyze the following Web3/blockchain data and create a Mermaid flowchart. 
-
-Data: ${dataStr}
-
-Requirements:
-- Start with exactly "flowchart TD"
-- Use simple node names (A, B, C, etc.) with descriptive labels in brackets
-- Include decision points with curly braces {} where appropriate
-- Use arrow connections (-->)
-- Keep labels concise and relevant to the data
-- Generate ONLY valid Mermaid syntax, no explanatory text
-
-Example format:
-flowchart TD
-    A[Start Process] --> B{Decision Point}
-    B -->|Yes| C[Action 1]
-    B -->|No| D[Action 2]`;
-
-    } else if (diagramType === 'graph') {
-      prompt = `Analyze the following Web3/blockchain data and create a Mermaid graph showing relationships.
-
-Data: ${dataStr}
-
-Requirements:
-- Start with exactly "graph LR" or "graph TD"
-- Use simple node identifiers (A, B, C, etc.) with labels in brackets
-- Show connections with --> arrows
-- Keep labels descriptive but concise
-- Generate ONLY valid Mermaid syntax, no explanatory text
-
-Example format:
-graph LR
-    A[Entity 1] --> B[Entity 2]
-    B --> C[Entity 3]`;
-
-    } else if (diagramType === 'mindmap') {
-      prompt = `Analyze the following Web3/blockchain data and create a Mermaid mindmap.
-
-Data: ${dataStr}
-
-Requirements:
-- Start with exactly "mindmap"
-- Use proper indentation (2 spaces per level)
-- Organize concepts hierarchically
-- Keep branch names concise
-- Generate ONLY valid Mermaid syntax, no explanatory text
-
-Example format:
-mindmap
-  root)Main Topic(
-    Branch 1
-      Sub-item 1
-      Sub-item 2
-    Branch 2
-      Sub-item 3`;
-    }
-
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.3,
-          topK: 20,
-          topP: 0.8,
-          maxOutputTokens: 1024,
-        }
-      }),
-    });
-
-    const responseData = await response.json();
-    
-    if (responseData.candidates && responseData.candidates[0] && responseData.candidates[0].content) {
-      let mermaidCode = responseData.candidates[0].content.parts[0].text;
-      
-      // Clean up the response to extract only the Mermaid code
-      mermaidCode = mermaidCode.replace(/```mermaid\n?/g, '').replace(/```\n?/g, '').trim();
-      
-      // Additional cleanup - remove any extra text before/after the diagram
-      const lines = mermaidCode.split('\n');
-      let startIndex = -1;
-      let endIndex = lines.length;
-      
-      // Find the start of the actual diagram
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim().match(/^(flowchart|graph|mindmap)/)) {
-          startIndex = i;
-          break;
-        }
-      }
-      
-      if (startIndex === -1) {
-        throw new Error('No valid Mermaid diagram found in AI response');
-      }
-      
-      // Extract the diagram code
-      const diagramLines = lines.slice(startIndex, endIndex);
-      mermaidCode = diagramLines.join('\n').trim();
-      
-      // Basic validation
-      if (!mermaidCode || mermaidCode.length < 10) {
-        throw new Error('Generated diagram code is too short or empty');
-      }
-      
-      // Validate syntax start
-      if (!mermaidCode.match(/^(flowchart|graph|mindmap)/)) {
-        throw new Error('Invalid Mermaid syntax - diagram must start with flowchart, graph, or mindmap');
-      }
-      
-      return mermaidCode;
-    } else {
-      throw new Error('Invalid response from Gemini API');
-    }
-  };
-
-  // Fallback diagram generator for when AI fails
-  const generateFallbackDiagram = (diagramType: 'flowchart' | 'graph' | 'mindmap'): string => {
-    if (diagramType === 'flowchart') {
-      return `flowchart TD
-    A[Data Input] --> B[Processing]
-    B --> C{Valid Data?}
-    C -->|Yes| D[Analysis]
-    C -->|No| E[Error Handling]
-    D --> F[Results]
-    E --> A`;
-    } else if (diagramType === 'graph') {
-      return `graph LR
-    A[Data Source] --> B[API Processing]
-    B --> C[Blockchain Data]
-    C --> D[Visualization]
-    D --> E[User Interface]`;
-    } else {
-      return `mindmap
-  root)Data Analysis(
-    Input Sources
-      API Data
-      Blockchain
-      User Queries
-    Processing
-      Validation
-      Analysis
-      Formatting
-    Output
-      Charts
-      Tables
-      Diagrams`;
-    }
-  };
 
 
 
-  // Render mermaid diagram
-  const renderMermaidDiagram = async (mermaidCode: string) => {
-    if (!mermaidRef.current || !mermaidCode) return;
 
-    try {
-      const element = mermaidRef.current;
-      
-      // Clear previous content
-      element.innerHTML = '';
-      
-      // Create a unique ID for this diagram
-      const diagramId = `mermaid-${Date.now()}`;
-      
-      // Validate and clean the mermaid code
-      const cleanCode = mermaidCode.trim();
-      if (!cleanCode) {
-        throw new Error('Empty diagram code');
-      }
-      
-      // Generate the diagram using mermaid render method
-      const { svg } = await mermaid.render(diagramId, cleanCode);
-      element.innerHTML = svg;
-      
-    } catch (error) {
-      console.error('Error rendering mermaid diagram:', error);
-      if (mermaidRef.current) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        mermaidRef.current.innerHTML = `
-          <div class="text-red-400 p-4 border border-red-400/30 rounded-lg bg-red-900/10">
-            <div class="font-semibold mb-2">❌ Diagram Rendering Error</div>
-            <div class="text-sm">${errorMessage}</div>
-            <div class="text-xs mt-2 text-red-300">Try generating a different diagram type or check the data content.</div>
-          </div>
-        `;
-      }
-    }
-  };
 
-  // Re-render mermaid when code changes
-  useEffect(() => {
-    if (localConfig.mode === 'mermaid' && localConfig.mermaidCode) {
-      renderMermaidDiagram(localConfig.mermaidCode);
-    }
-  }, [localConfig.mode, localConfig.mermaidCode]);
+
+
+
+
+
+
 
   const viewMode = localConfig.mode ?? 'formatted';
 
@@ -796,17 +501,7 @@ mindmap
         >
           🧮 Metrics
         </button>
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'mermaid' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'mermaid'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-          disabled={isGeneratingMermaid}
-        >
-          🧩 Diagram
-        </button>
+
         <button
           onClick={() => setConfig({ ...localConfig, mode: 'ai_suggestions' })}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
@@ -870,82 +565,7 @@ mindmap
           </div>
         )}
         {viewMode === 'metrics' && renderMetrics()}
-        {viewMode === 'mermaid' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white">Interactive Diagram</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => generateMermaidDiagram('flowchart')}
-                  className="px-3 py-1.5 bg-blue-600/30 hover:bg-blue-600/50 rounded-lg text-sm border border-blue-500/50 text-blue-300"
-                  disabled={isGeneratingMermaid}
-                >
-                  🔄 Flowchart
-                </button>
-                <button
-                  onClick={() => generateMermaidDiagram('graph')}
-                  className="px-3 py-1.5 bg-green-600/30 hover:bg-green-600/50 rounded-lg text-sm border border-green-500/50 text-green-300"
-                  disabled={isGeneratingMermaid}
-                >
-                  🌐 Network
-                </button>
-                <button
-                  onClick={() => generateMermaidDiagram('mindmap')}
-                  className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 rounded-lg text-sm border border-purple-500/50 text-purple-300"
-                  disabled={isGeneratingMermaid}
-                >
-                  🧠 Mindmap
-                </button>
-              </div>
-            </div>
-            {isGeneratingMermaid ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin mr-3"></div>
-                <span className="text-white/70">AI is analyzing your data and generating a custom diagram...</span>
-              </div>
-            ) : localConfig.mermaidCode ? (
-              <div className="space-y-3">
-                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
-                  <div 
-                    ref={mermaidRef} 
-                    className="mermaid-diagram"
-                    style={{ 
-                      display: 'flex', 
-                      justifyContent: 'center', 
-                      background: 'transparent',
-                      color: '#ffffff'
-                    }}
-                  >
-                    {localConfig.mermaidCode}
-                  </div>
-                </div>
-                <div className="text-xs text-gray-500 text-center">
-                  ✨ This diagram was generated by AI based on your specific data content
-                </div>
-                {lastGeneratedCode && (
-                  <details className="mt-3">
-                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
-                      🔍 View Generated Code
-                    </summary>
-                    <pre className="text-xs text-gray-400 mt-2 p-2 bg-gray-800/50 rounded border border-gray-600/30 overflow-x-auto">
-                      {lastGeneratedCode}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <p className="mb-2">🤖 Ready to generate AI-powered diagrams</p>
-                <p className="text-sm">Click one of the buttons above to create a custom diagram based on your data</p>
-                {!process.env.NEXT_PUBLIC_GEMINI_API_KEY && (
-                  <p className="text-xs text-yellow-400 mt-3">
-                    ⚠️ Gemini API key not configured. Fallback diagrams will be used.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+
         {viewMode === 'ai_suggestions' && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
@@ -974,12 +594,7 @@ mindmap
                         {suggestion.title}
                       </h4>
                       <p className="text-gray-400 text-sm mt-1">{suggestion.description}</p>
-                      {suggestion.id.startsWith('ai_') && (
-                        <div className="flex items-center gap-1 mt-2">
-                          <span className="text-xs text-purple-400">🔮 AI-Generated</span>
-                          <span className="text-xs text-gray-500">• Custom for your data</span>
-                        </div>
-                      )}
+
                     </div>
                     <div className="text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
                       →
