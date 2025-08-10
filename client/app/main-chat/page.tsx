@@ -4,21 +4,26 @@
 import { useState, useRef, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
+import { FileDown, FileSpreadsheet, FileText, Lock, CheckCircle, Settings, Eye, EyeOff, MessageSquare, Clock, Users } from 'lucide-react';
 import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { WavyBackground } from '../../components/ui/wavy-background';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import * as XLSX from 'xlsx';
 
 
 
 interface ResearchResult {
   success: boolean;
   data?: any;
-  result?: any; // Backend returns data in 'result' field
+  result?: any; // Backend returns formatted AI response in 'result' field
   error?: string;
   timestamp?: string;
   query?: string;
   address?: string;
   time_range?: string;
+  session_id?: string; // Session ID for conversation tracking
   reasoning_steps?: string[];
   citations?: Array<{
     source: string;
@@ -28,7 +33,7 @@ interface ResearchResult {
   data_sources_used?: string[];
   execution_time?: number;
   query_intent?: string;
-  merged_data?: any;
+  merged_data?: any; // Structured data from backend
   data_quality_score?: number;
   tool_results?: any[];
 }
@@ -50,17 +55,44 @@ interface ChatMessage {
   result?: ResearchResult; // When assistant returns structured data
 }
 
+interface ConversationSession {
+  session_id: string;
+  message_count: number;
+  created_at: string;
+  last_activity: string;
+}
+
+interface ConversationHistory {
+  success: boolean;
+  session_id: string;
+  messages: Array<{
+    type: 'human' | 'ai';
+    content: string;
+    timestamp: string;
+  }>;
+  message_count: number;
+  created_at: string;
+  last_activity: string;
+}
+
 export default function MainChat() {
   const { address: connectedAddress, isConnected } = useAccount();
   const [query, setQuery] = useState('');
   const [address, setAddress] = useState('');
   const [timeRange, setTimeRange] = useState('7d');
   const [loading, setLoading] = useState(false);
+  
+  // Session management state
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<ConversationHistory | null>(null);
+  const [showSessionInfo, setShowSessionInfo] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       role: 'assistant',
-      text: 'Hi! I\'m your AIRAA Research Agent. Ask me anything about Web3, DeFi, or on-chain analytics. Your connected wallet address is automatically used for personalized analysis.',
+      text: 'Hi! I\'m your AIRAA Research Agent. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.',
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -87,6 +119,7 @@ export default function MainChat() {
   // Check API health on component mount
   useEffect(() => {
     checkApiHealth();
+    initializeSession();
   }, []);
 
   // Sync connected wallet address
@@ -101,6 +134,89 @@ export default function MainChat() {
     endOfChatRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  // Initialize or restore session
+  const initializeSession = () => {
+    // Check if there's a session in localStorage
+    const storedSessionId = localStorage.getItem('airaa-session-id');
+    if (storedSessionId) {
+      console.log(`Restoring session: ${storedSessionId}`);
+      setSessionId(storedSessionId);
+      // Load conversation history with a small delay to ensure state is set
+      setTimeout(() => loadConversationHistory(storedSessionId, false, true), 500);
+    } else {
+      // Generate new session ID
+      const newSessionId = `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`Creating new session: ${newSessionId}`);
+      setSessionId(newSessionId);
+      localStorage.setItem('airaa-session-id', newSessionId);
+    }
+  };
+
+  // Load conversation history from backend
+  const loadConversationHistory = async (sessionId: string, showLoading: boolean = true, replaceMessages: boolean = true) => {
+    if (showLoading) setLoadingHistory(true);
+    
+    try {
+      const response = await fetch(`https://airaaagent.onrender.com/api/conversation/${sessionId}`);
+      if (response.ok) {
+        const history: ConversationHistory = await response.json();
+        setConversationHistory(history);
+        
+        // Only replace messages if explicitly requested (e.g., on initial load)
+        if (replaceMessages && history.messages && history.messages.length > 0) {
+          // Keep the welcome message and add restored conversation
+          const restoredMessages: ChatMessage[] = history.messages.map((msg, index) => {
+            if (msg.type === 'human') {
+              return {
+                id: `restored-${sessionId}-${index}`,
+                role: 'user' as ChatRole,
+                text: msg.content,
+                timestamp: msg.timestamp,
+              };
+            } else {
+              // For AI messages, show the actual content directly without result wrapper
+              return {
+                id: `restored-${sessionId}-${index}`,
+                role: 'assistant' as ChatRole,
+                text: msg.content,
+                timestamp: msg.timestamp,
+              };
+            }
+          });
+          
+          // Replace messages with welcome + restored conversation
+          setMessages([
+            {
+              id: 'welcome-restored',
+              role: 'assistant',
+              text: `Hi! I\'m your AIRAA Research Agent. I found our previous conversation with ${Math.floor(history.messages.length / 2)} exchanges. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.`,
+              timestamp: new Date().toISOString(),
+            },
+            ...restoredMessages
+          ]);
+          
+          console.log(`Restored ${history.messages.length} messages from session ${sessionId}`);
+          console.log('Restored messages:', restoredMessages.map(m => ({ role: m.role, text: m.text?.slice(0, 50) + '...' })));
+        } else if (replaceMessages && (!history.messages || history.messages.length === 0)) {
+          // No previous messages, just update welcome message
+          setMessages([{
+            id: 'welcome',
+            role: 'assistant',
+            text: 'Hi! I\'m your AIRAA Research Agent. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.',
+            timestamp: new Date().toISOString(),
+          }]);
+        }
+      } else if (response.status === 404) {
+        // Session not found, that's okay for new sessions
+        console.log(`Session ${sessionId} not found - this is a new session`);
+      }
+    } catch (error) {
+      console.warn('Could not load conversation history:', error);
+    } finally {
+      if (showLoading) setLoadingHistory(false);
+    }
+  };
+
   const checkApiHealth = async () => {
     try {
       const response = await fetch('https://airaaagent.onrender.com/api/health');
@@ -108,6 +224,29 @@ export default function MainChat() {
       setApiStats(prev => ({ ...prev, isOnline: data.status === 'ok' }));
     } catch (error) {
       setApiStats(prev => ({ ...prev, isOnline: false }));
+    }
+  };
+
+  // Start new conversation session
+  const startNewSession = () => {
+    const newSessionId = `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(newSessionId);
+    localStorage.setItem('airaa-session-id', newSessionId);
+    setConversationHistory(null);
+    
+    // Clear current conversation (keep only welcome message)
+    setMessages([{
+      id: 'welcome',
+      role: 'assistant',
+      text: 'Hi! I\'m your AIRAA Research Agent. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.',
+      timestamp: new Date().toISOString(),
+    }]);
+  };
+
+  // Refresh conversation history
+  const refreshConversationHistory = (showLoading: boolean = true, replaceMessages: boolean = false) => {
+    if (sessionId) {
+      loadConversationHistory(sessionId, showLoading, replaceMessages);
     }
   };
 
@@ -136,11 +275,18 @@ export default function MainChat() {
           query: trimmed,
           address: address.trim() || undefined,
           time_range: timeRange,
+          session_id: sessionId,
         }),
       });
 
       const data = await response.json();
       const responseTime = Date.now() - startTime;
+
+      // Update session ID if returned from backend
+      if (data.session_id && data.session_id !== sessionId) {
+        setSessionId(data.session_id);
+        localStorage.setItem('airaa-session-id', data.session_id);
+      }
 
       const normalized: ResearchResult = {
         ...data,
@@ -149,6 +295,7 @@ export default function MainChat() {
         query: trimmed,
         address: address || undefined,
         time_range: timeRange,
+        session_id: data.session_id || sessionId,
       };
 
       const assistantMessage: ChatMessage = {
@@ -161,6 +308,7 @@ export default function MainChat() {
         result: normalized,
       };
 
+      // Add the new message to the existing messages (don't reload history)
       setMessages(prev => [...prev, assistantMessage]);
 
       setApiStats(prev => ({
@@ -171,6 +319,19 @@ export default function MainChat() {
           (prev.totalQueries + 1),
         isOnline: true,
       }));
+
+      // Update conversation history stats but don't reload messages (to avoid overwriting new responses)
+      if (data.success && sessionId) {
+        setTimeout(() => {
+          // Only update the conversation history metadata, not the messages
+          fetch(`https://airaaagent.onrender.com/api/conversation/${sessionId}`)
+            .then(response => response.json())
+            .then((history: ConversationHistory) => {
+              setConversationHistory(history);
+            })
+            .catch(error => console.warn('Could not update conversation history:', error));
+        }, 1000);
+      }
     } catch (error: any) {
       const assistantErrorMessage: ChatMessage = {
         id: `a-${Date.now()}`,
@@ -191,27 +352,24 @@ export default function MainChat() {
     }
   };
 
-  const downloadResult = (res: ResearchResult, format: 'json' | 'csv') => {
-    if (!res?.data) return;
+  const downloadResult = (res: ResearchResult, format: 'json' | 'excel' | 'pdf') => {
+    if (!res) return;
 
-    let content: string;
-    let filename: string;
-    let mimeType: string;
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = `airaa-research-${timestamp}`;
 
     if (format === 'json') {
-      content = JSON.stringify(res, null, 2);
-      filename = `research-${Date.now()}.json`;
-      mimeType = 'application/json';
-    } else {
-      const flatData = flattenObject(res.data);
-      const headers = Object.keys(flatData).join(',');
-      const values = Object.values(flatData).map(v => `"${v}"`).join(',');
-      content = `${headers}\n${values}`;
-      filename = `research-${Date.now()}.csv`;
-      mimeType = 'text/csv';
+      const content = JSON.stringify(res, null, 2);
+      const blob = new Blob([content], { type: 'application/json' });
+      downloadBlob(blob, `${filename}.json`);
+    } else if (format === 'excel') {
+      downloadExcel(res, filename);
+    } else if (format === 'pdf') {
+      downloadPDF(res, filename);
     }
+  };
 
-    const blob = new Blob([content], { type: mimeType });
+  const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -220,6 +378,213 @@ export default function MainChat() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const downloadExcel = (res: ResearchResult, filename: string) => {
+    const workbook = XLSX.utils.book_new();
+
+    // AI Response sheet - Main formatted response
+    const aiResponseData = [{
+      'AI Analysis': res.result || res.data || 'No analysis available'
+    }];
+    const aiResponseSheet = XLSX.utils.json_to_sheet(aiResponseData);
+    XLSX.utils.book_append_sheet(workbook, aiResponseSheet, 'AI Analysis');
+
+    // Structured data sheet (if available)
+    if (res.merged_data) {
+      try {
+        const flatData = flattenObjectForExcel(res.merged_data);
+        if (Object.keys(flatData).length > 0) {
+          const structuredSheet = XLSX.utils.json_to_sheet([flatData]);
+          XLSX.utils.book_append_sheet(workbook, structuredSheet, 'Structured Data');
+        }
+      } catch (error) {
+        console.warn('Could not process structured data for Excel:', error);
+      }
+    }
+
+    // Raw data sheet (if different from merged_data)
+    if (res.data && res.data !== res.merged_data) {
+      try {
+        const rawFlatData = flattenObjectForExcel(res.data);
+        if (Object.keys(rawFlatData).length > 0) {
+          const rawDataSheet = XLSX.utils.json_to_sheet([rawFlatData]);
+          XLSX.utils.book_append_sheet(workbook, rawDataSheet, 'Raw Data');
+        }
+      } catch (error) {
+        console.warn('Could not process raw data for Excel:', error);
+      }
+    }
+
+    // Metadata sheet
+    const metadata = {
+      Query: res.query || '',
+      Address: res.address || '',
+      'Time Range': res.time_range || '',
+      Timestamp: res.timestamp || '',
+      'Execution Time': res.execution_time ? `${res.execution_time}ms` : '',
+      'Data Quality Score': res.data_quality_score || '',
+      'Query Intent': res.query_intent || ''
+    };
+    const metadataSheet = XLSX.utils.json_to_sheet([metadata]);
+    XLSX.utils.book_append_sheet(workbook, metadataSheet, 'Metadata');
+
+    // Reasoning steps sheet
+    if (res.reasoning_steps && res.reasoning_steps.length > 0) {
+      const reasoningData = res.reasoning_steps.map((step, index) => ({
+        Step: index + 1,
+        Description: step
+      }));
+      const reasoningSheet = XLSX.utils.json_to_sheet(reasoningData);
+      XLSX.utils.book_append_sheet(workbook, reasoningSheet, 'Reasoning Steps');
+    }
+
+    // Citations sheet
+    if (res.citations && res.citations.length > 0) {
+      const citationsSheet = XLSX.utils.json_to_sheet(res.citations);
+      XLSX.utils.book_append_sheet(workbook, citationsSheet, 'Citations');
+    }
+
+    // Data sources sheet
+    if (res.data_sources_used && res.data_sources_used.length > 0) {
+      const sourcesData = res.data_sources_used.map((source, index) => ({
+        Index: index + 1,
+        'Data Source': source
+      }));
+      const sourcesSheet = XLSX.utils.json_to_sheet(sourcesData);
+      XLSX.utils.book_append_sheet(workbook, sourcesSheet, 'Data Sources');
+    }
+
+    XLSX.writeFile(workbook, `${filename}.xlsx`);
+  };
+
+  const downloadPDF = async (res: ResearchResult, filename: string) => {
+    const pdf = new jsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 20;
+    let yPosition = margin;
+
+    // Helper function to add text with word wrap
+    const addText = (text: string, fontSize = 12, fontStyle: 'normal' | 'bold' = 'normal') => {
+      if (!text) return;
+      
+      pdf.setFontSize(fontSize);
+      pdf.setFont('helvetica', fontStyle);
+      const lines = pdf.splitTextToSize(text.toString(), pageWidth - 2 * margin);
+      pdf.text(lines, margin, yPosition);
+      yPosition += lines.length * (fontSize * 0.4) + 5;
+      
+      // Check if we need a new page
+      if (yPosition > pdf.internal.pageSize.getHeight() - margin) {
+        pdf.addPage();
+        yPosition = margin;
+      }
+    };
+
+    // Title
+    addText('AIRAA Research Report', 20, 'bold');
+    yPosition += 10;
+
+    // Metadata
+    addText('Query Details', 16, 'bold');
+    addText(`Query: ${res.query || 'N/A'}`);
+    addText(`Address: ${res.address || 'N/A'}`);
+    addText(`Time Range: ${res.time_range || 'N/A'}`);
+    addText(`Timestamp: ${res.timestamp || 'N/A'}`);
+    if (res.execution_time) addText(`Execution Time: ${res.execution_time}ms`);
+    if (res.data_quality_score) addText(`Data Quality Score: ${res.data_quality_score}%`);
+    if (res.query_intent) addText(`Query Intent: ${res.query_intent}`);
+    yPosition += 10;
+
+    // Main AI Analysis
+    const aiResponse = res.result || res.data;
+    if (aiResponse) {
+      addText('AI Analysis & Insights', 16, 'bold');
+      
+      // Handle both string and object responses
+      if (typeof aiResponse === 'string') {
+        addText(aiResponse, 11);
+      } else if (typeof aiResponse === 'object') {
+        addText(JSON.stringify(aiResponse, null, 2), 10);
+      }
+      yPosition += 10;
+    }
+
+    // Reasoning Steps
+    if (res.reasoning_steps && res.reasoning_steps.length > 0) {
+      addText('Reasoning Steps', 16, 'bold');
+      res.reasoning_steps.forEach((step, index) => {
+        addText(`${index + 1}. ${step}`, 11);
+      });
+      yPosition += 10;
+    }
+
+    // Data Sources Used
+    if (res.data_sources_used && res.data_sources_used.length > 0) {
+      addText('Data Sources Used', 16, 'bold');
+      res.data_sources_used.forEach((source, index) => {
+        addText(`${index + 1}. ${source.replace('_', ' ').toUpperCase()}`, 11);
+      });
+      yPosition += 10;
+    }
+
+    // Citations
+    if (res.citations && res.citations.length > 0) {
+      addText('Citations & References', 16, 'bold');
+      res.citations.forEach((citation, index) => {
+        addText(`${index + 1}. ${citation.source} (${citation.timestamp})`, 11);
+        if (citation.query_context) {
+          addText(`   Context: ${citation.query_context}`, 10);
+        }
+      });
+      yPosition += 10;
+    }
+
+    // Structured Data Summary (if available)
+    if (res.merged_data) {
+      try {
+        addText('Structured Data Summary', 16, 'bold');
+        const flatData = flattenObjectForExcel(res.merged_data);
+        const dataEntries = Object.entries(flatData).slice(0, 20); // Limit to first 20 entries
+        
+        if (dataEntries.length > 0) {
+          dataEntries.forEach(([key, value]) => {
+            const displayKey = key.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim();
+            const displayValue = Array.isArray(value) ? value.join(', ') : String(value);
+            addText(`${displayKey}: ${displayValue.slice(0, 100)}${displayValue.length > 100 ? '...' : ''}`, 10);
+          });
+          
+          if (Object.keys(flatData).length > 20) {
+            addText('... and more data available in structured format', 10);
+          }
+        }
+      } catch (error) {
+        console.warn('Could not process structured data for PDF:', error);
+        addText('Structured data available but could not be processed for PDF format.', 10);
+      }
+    }
+
+    pdf.save(`${filename}.pdf`);
+  };
+
+  const flattenObjectForExcel = (obj: any, prefix = ''): Record<string, any> => {
+    let flattened: Record<string, any> = {};
+    
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        const newKey = prefix ? `${prefix}_${key}` : key;
+        
+        if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+          Object.assign(flattened, flattenObjectForExcel(obj[key], newKey));
+        } else if (Array.isArray(obj[key])) {
+          flattened[newKey] = obj[key].join('; ');
+        } else {
+          flattened[newKey] = obj[key];
+        }
+      }
+    }
+    
+    return flattened;
   };
 
   const flattenObject = (obj: any, prefix = ''): Record<string, any> => {
@@ -240,13 +605,7 @@ export default function MainChat() {
     return flattened;
   };
 
-  const exampleQueries = [
-    "Analyze Bitcoin price trends and market sentiment",
-    "What is the TVL and performance of Uniswap protocol?",
-    "Show me Ethereum network health and gas fees",
-    "Compare DeFi yields across different protocols",
-    "Research Solana ecosystem growth metrics"
-  ];
+
 
   // Removed URL query parameter handling
 
@@ -264,11 +623,81 @@ export default function MainChat() {
       {/* Header with Connect Button */}
       <header className="relative z-20 max-w-5xl mx-auto px-4 pt-8 pb-4">
         <div className="flex justify-between items-center">
-          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
-            AIRAA Research Agent
-          </h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+              AIRAA Research Agent
+            </h1>
+            {sessionId && (
+              <button
+                onClick={() => setShowSessionInfo(!showSessionInfo)}
+                className="text-sm px-3 py-1.5 rounded-full border border-white/30 hover:border-white/50 flex items-center gap-2 transition-colors"
+                title="Session Information"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span className="hidden md:inline">Session Active</span>
+              </button>
+            )}
+          </div>
           <ConnectButton />
         </div>
+        
+        {/* Session Information Panel */}
+        {showSessionInfo && sessionId && (
+          <div className="mt-4 rounded-2xl border border-white/20 backdrop-blur-xl bg-white/5 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <MessageSquare className="w-5 h-5" />
+                Conversation Session
+                {loadingHistory && <div className="text-xs text-white/60">(Loading...)</div>}
+              </h3>
+              <button
+                onClick={startNewSession}
+                className="text-sm px-3 py-1.5 rounded-lg border border-white/30 hover:border-white/50 transition-colors"
+              >
+                New Session
+              </button>
+            </div>
+            
+            <div className="grid md:grid-cols-2 gap-4 text-sm">
+              <div>
+                <div className="text-white/60 mb-1">Session ID</div>
+                <div className="font-mono text-white/80 break-all">{sessionId}</div>
+              </div>
+              
+              {conversationHistory && (
+                <>
+                  <div>
+                    <div className="text-white/60 mb-1 flex items-center gap-1">
+                      <Clock className="w-4 h-4" />
+                      Message History
+                    </div>
+                    <div className="text-white/80">{conversationHistory.message_count} messages</div>
+                  </div>
+                  
+                  <div>
+                    <div className="text-white/60 mb-1">Created</div>
+                    <div className="text-white/80">{new Date(conversationHistory.created_at).toLocaleString()}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="text-white/60 mb-1">Last Activity</div>
+                    <div className="text-white/80">{new Date(conversationHistory.last_activity).toLocaleString()}</div>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <div className="text-xs text-white/50 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4" />
+                Conversation memory active - I'll remember our previous discussions
+                {conversationHistory && conversationHistory.message_count > 0 && (
+                  <span className="text-green-400">({conversationHistory.message_count} messages loaded)</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {!isConnected ? (
@@ -280,17 +709,16 @@ export default function MainChat() {
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
             }}>
               <div className="w-16 h-16 mx-auto mb-6 rounded-full border border-white/20 flex items-center justify-center bg-white/5">
-                <svg className="w-8 h-8 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
+                <Lock className="w-8 h-8 text-white/60" />
               </div>
               <h2 className="text-2xl font-semibold mb-3">Connect Your Wallet</h2>
               <p className="text-white/70 mb-6 leading-relaxed">
                 To access AIRAA's research capabilities and personalized on-chain analytics, 
                 please connect your wallet using the button above.
               </p>
-              <div className="text-sm text-white/50">
-                🔒 Your wallet connection is secure and only used for address-based analytics
+              <div className="text-sm text-white/50 flex items-center justify-center gap-2">
+                <Lock className="w-4 h-4" />
+                Your wallet connection is secure and only used for address-based analytics
               </div>
             </div>
           </div>
@@ -302,18 +730,7 @@ export default function MainChat() {
           background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
         }}>
-          {/* Quick Examples */}
-          <div className="mb-4 flex flex-wrap gap-2">
-            {exampleQueries.map((ex, idx) => (
-                <button
-                key={idx}
-                onClick={() => setQuery(ex)}
-                className="px-5 py-2.5 rounded-xl border border-white/[0.1] backdrop-blur-sm bg-white/[0.03] text-sm md:text-base hover:bg-white/[0.08] hover:border-white/[0.2] transition-all duration-200 text-white/80 hover:text-white"
-              >
-                {ex}
-                </button>
-              ))}
-          </div>
+
 
           {/* Messages */}
           <div
@@ -345,14 +762,32 @@ export default function MainChat() {
 
                   {m.result && (
                     <div className="mt-3 space-y-3">
-                      {/* Status tag */}
-                      <div className={`inline-block text-sm px-2.5 py-1.5 rounded border ${
-                        m.result.success
-                          ? 'border-green-400 text-green-300'
-                          : 'border-red-400 text-red-300'
-                      }`}>
-                        {m.result.success ? 'Success' : 'Error'}
-            </div>
+                      {/* Status and context tags */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className={`inline-block text-sm px-2.5 py-1.5 rounded border ${
+                          m.result.success
+                            ? 'border-green-400 text-green-300'
+                            : 'border-red-400 text-red-300'
+                        }`}>
+                          {m.result.success ? 'Success' : 'Error'}
+                        </div>
+                        
+                        {/* Show session context if available */}
+                        {m.result.session_id && (
+                          <div className="inline-block text-sm px-2.5 py-1.5 rounded border border-blue-400/50 text-blue-300">
+                            <MessageSquare className="w-3 h-3 inline mr-1" />
+                            Memory Active
+                          </div>
+                        )}
+                        
+                        {/* Show conversation history count if available */}
+                        {conversationHistory && conversationHistory.message_count > 0 && (
+                          <div className="inline-block text-sm px-2.5 py-1.5 rounded border border-purple-400/50 text-purple-300">
+                            <Clock className="w-3 h-3 inline mr-1" />
+                            {conversationHistory.message_count} msgs
+                          </div>
+                        )}
+                      </div>
 
                       {/* Visualization */}
                       {m.result.success && m.result.data ? (
@@ -398,19 +833,28 @@ export default function MainChat() {
                     )}
 
                       {/* Actions */}
-                      {m.result && m.result.success && m.result.data && (
-                        <div className="flex items-center gap-2">
+                      {m.result && m.result.success && (m.result.data || m.result.result || m.result.merged_data) && (
+                        <div className="flex items-center gap-2 flex-wrap">
                           <button
                             onClick={() => downloadResult(m.result!, 'json')}
-                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white"
+                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white flex items-center gap-2 transition-colors"
                           >
-                            📄 Download JSON
+                            <FileDown className="w-4 h-4" />
+                            JSON
                           </button>
                           <button
-                            onClick={() => downloadResult(m.result!, 'csv')}
-                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white"
+                            onClick={() => downloadResult(m.result!, 'excel')}
+                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white flex items-center gap-2 transition-colors"
                           >
-                            📊 Download CSV
+                            <FileSpreadsheet className="w-4 h-4" />
+                            Excel
+                          </button>
+                          <button
+                            onClick={() => downloadResult(m.result!, 'pdf')}
+                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white flex items-center gap-2 transition-colors"
+                          >
+                            <FileText className="w-4 h-4" />
+                            PDF
                           </button>
                   </div>
                       )}
@@ -440,41 +884,108 @@ export default function MainChat() {
           <div className="flex items-center justify-between mt-4">
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-sm px-3.5 py-1.5 rounded-full border border-white/30 hover:border-white"
+              className="text-sm px-3.5 py-1.5 rounded-full border border-white/30 hover:border-white flex items-center gap-2"
             >
+              {showAdvanced ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               {showAdvanced ? 'Hide settings' : 'Show settings'}
             </button>
-            <div className="text-sm text-white/60">Time Range: {timeRange}{address ? ` • Address: ${address.slice(0, 6)}...${address.slice(-4)}` : ''}</div>
+            <div className="text-sm text-white/60">
+              Time Range: {timeRange}
+              {address ? ` • Address: ${address.slice(0, 6)}...${address.slice(-4)}` : ''}
+              {sessionId ? ` • Session: ${sessionId.slice(-8)}` : ''}
+            </div>
           </div>
 
           {showAdvanced && (
-            <div className="mt-3 grid md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm text-white/70 mb-1">Connected Wallet Address</label>
-                <input
-                  type="text"
-                  value={address}
-                  readOnly
-                  placeholder="Connected wallet address"
-                  className="w-full bg-white/5 border-2 border-white/20 rounded-xl px-3 py-2 text-white/80 cursor-not-allowed"
-                />
-                <div className="text-sm text-white/60 mt-1">
-                  ✅ Automatically populated from connected wallet
+            <div className="mt-3 space-y-4">
+              <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">Connected Wallet Address</label>
+                  <input
+                    type="text"
+                    value={address}
+                    readOnly
+                    placeholder="Connected wallet address"
+                    className="w-full bg-white/5 border-2 border-white/20 rounded-xl px-3 py-2 text-white/80 cursor-not-allowed"
+                  />
+                  <div className="text-sm text-white/60 mt-1 flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4" />
+                    Automatically populated from connected wallet
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">Time Range</label>
+                  <select
+                    value={timeRange}
+                    onChange={(e) => setTimeRange(e.target.value)}
+                    className="w-full bg-transparent border-2 border-white/20 rounded-xl px-3 py-2 focus:outline-none focus:border-white"
+                  >
+                    <option className="bg-black" value="1d">Last 24 Hours</option>
+                    <option className="bg-black" value="7d">Last 7 Days</option>
+                    <option className="bg-black" value="30d">Last 30 Days</option>
+                    <option className="bg-black" value="90d">Last 90 Days</option>
+                    <option className="bg-black" value="1y">Last Year</option>
+                  </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm text-white/70 mb-1">Time Range</label>
-                <select
-                  value={timeRange}
-                  onChange={(e) => setTimeRange(e.target.value)}
-                  className="w-full bg-transparent border-2 border-white/20 rounded-xl px-3 py-2 focus:outline-none focus:border-white"
-                >
-                  <option className="bg-black" value="1d">Last 24 Hours</option>
-                  <option className="bg-black" value="7d">Last 7 Days</option>
-                  <option className="bg-black" value="30d">Last 30 Days</option>
-                  <option className="bg-black" value="90d">Last 90 Days</option>
-                  <option className="bg-black" value="1y">Last Year</option>
-                </select>
+              
+              {/* Session Management */}
+              <div className="border-t border-white/10 pt-4">
+                <label className="block text-sm text-white/70 mb-2">Conversation Memory</label>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-sm text-white/60 mb-1">Current Session</div>
+                    <div className="font-mono text-xs text-white/80 bg-white/5 rounded-lg p-2 break-all">
+                      {sessionId || 'No session active'}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={startNewSession}
+                      className="px-3 py-2 text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      New Conversation
+                    </button>
+                    <button
+                      onClick={() => refreshConversationHistory()}
+                      className="px-3 py-2 text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2"
+                      disabled={!sessionId}
+                    >
+                      <Clock className="w-4 h-4" />
+                      Refresh History
+                    </button>
+                  </div>
+                </div>
+                
+                {conversationHistory && (
+                  <div className="mt-3 text-sm">
+                    <div className="text-white/60 mb-1">Session Statistics</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <div className="text-white/50">Messages</div>
+                        <div className="text-white/80 flex items-center gap-1">
+                          {conversationHistory.message_count}
+                          {conversationHistory.message_count > 0 && <CheckCircle className="w-3 h-3 text-green-400" />}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-white/50">Created</div>
+                        <div className="text-white/80">{new Date(conversationHistory.created_at).toLocaleDateString()}</div>
+                      </div>
+                      <div>
+                        <div className="text-white/50">Last Active</div>
+                        <div className="text-white/80">{new Date(conversationHistory.last_activity).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                    {conversationHistory.message_count > 0 && (
+                      <div className="mt-2 text-xs text-green-400 flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        Previous conversation loaded - context is preserved
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
