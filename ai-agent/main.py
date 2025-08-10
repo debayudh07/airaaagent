@@ -45,6 +45,142 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # NANSEN_API_KEY = ""
 
 # =============================
+# Greeting Detection & Responses
+# =============================
+def detect_greeting(query: str) -> bool:
+    """Detect if the query is a greeting or casual conversation"""
+    query_lower = query.lower().strip()
+    
+    # Common greetings and casual conversation starters
+    greetings = [
+        "hi", "hello", "hey", "hiya", "howdy", "greetings",
+        "good morning", "good afternoon", "good evening", "good day",
+        "what's up", "whats up", "how are you", "how're you", "how are you doing",
+        "how's it going", "hows it going", "how's everything", "hows everything",
+        "nice to meet you", "pleasure to meet you", "thanks", "thank you",
+        "bye", "goodbye", "see you", "catch you later", "take care",
+        "how do you do", "sup", "yo", "cheers"
+    ]
+    
+    # Check for exact matches or if query starts with greeting
+    for greeting in greetings:
+        if query_lower == greeting or query_lower.startswith(greeting + " ") or query_lower.startswith(greeting + ","):
+            return True
+    
+    # Check for greeting patterns
+    greeting_patterns = [
+        r"\b(hi|hello|hey)\b.*",
+        r"good\s+(morning|afternoon|evening|day)",
+        r"how\s+(are|is)\s+you",
+        r"what['']?s\s+up",
+        r"nice\s+to\s+meet\s+you",
+        r"thanks?\s+(you)?",
+        r"thank\s+you"
+    ]
+    
+    for pattern in greeting_patterns:
+        if re.match(pattern, query_lower):
+            return True
+    
+    return False
+
+def get_greeting_response(query: str, session_context: Dict[str, Any] = None) -> str:
+    """Generate appropriate AI greeting responses"""
+    query_lower = query.lower().strip()
+    
+    # Check if this is a returning user
+    is_returning = session_context and session_context.get("message_count", 0) > 2
+    
+    # Morning greetings
+    if any(word in query_lower for word in ["good morning", "morning"]):
+        responses = [
+            "Good morning! ☀️ Ready to dive into some Web3 research today? I can help you analyze crypto markets, track DeFi protocols, or explore blockchain data.",
+            "Morning! 🌅 What crypto insights are you looking for today? I've got access to real-time market data, DeFi analytics, and blockchain metrics.",
+            "Good morning! ⚡ Let's make today productive with some Web3 research. What would you like to explore?"
+        ]
+    
+    # Evening greetings
+    elif any(word in query_lower for word in ["good evening", "evening"]):
+        responses = [
+            "Good evening! 🌙 Perfect time to catch up on crypto markets. What Web3 data are you curious about?",
+            "Evening! 🌆 The crypto markets never sleep, and neither do I. How can I help with your research tonight?",
+            "Good evening! ✨ Ready to explore some blockchain insights? I can analyze anything from DeFi yields to market trends."
+        ]
+    
+    # Afternoon greetings
+    elif any(word in query_lower for word in ["good afternoon", "afternoon"]):
+        responses = [
+            "Good afternoon! 🌤️ Hope your day is going well! What crypto research can I help you with?",
+            "Afternoon! ☀️ Time for some Web3 analysis? I'm here to help with market data, protocol insights, or blockchain metrics.",
+            "Good afternoon! 🚀 Ready to explore the crypto universe? Let me know what you'd like to research."
+        ]
+    
+    # How are you / How's it going
+    elif any(phrase in query_lower for phrase in ["how are you", "how're you", "how's it going", "hows it going", "how are you doing"]):
+        responses = [
+            "I'm doing great, thanks for asking! 🤖 My circuits are buzzing with excitement to help you research Web3 data. What's on your crypto curiosity list today?",
+            "Fantastic! 💫 I'm energized and ready to dive into some blockchain analytics. How can I assist with your crypto research?",
+            "I'm excellent! 🔥 Always excited to help explore the fascinating world of Web3. What would you like to analyze today?",
+            "Doing wonderfully! ⚡ My databases are fresh and my APIs are ready. What crypto insights are you looking for?"
+        ]
+    
+    # What's up
+    elif any(phrase in query_lower for phrase in ["what's up", "whats up", "sup", "wassup"]):
+        responses = [
+            "Hey there! 👋 Just here monitoring the crypto markets and ready to help with any Web3 research you need!",
+            "Not much, just keeping tabs on DeFi protocols and blockchain metrics! 📊 What's up with you? Any crypto questions?",
+            "Just analyzing the latest market movements! 📈 What brings you here today? Looking for some Web3 insights?",
+            "Hey! 🚀 Just hanging out in the data streams, ready to help you explore the crypto universe. What's on your mind?"
+        ]
+    
+    # Thank you
+    elif any(phrase in query_lower for phrase in ["thanks", "thank you"]):
+        responses = [
+            "You're very welcome! 😊 Happy to help anytime with your Web3 research needs!",
+            "My pleasure! 🌟 Always here when you need crypto insights or blockchain analysis.",
+            "Absolutely! 💙 That's what I'm here for. Feel free to ask about any Web3 topics anytime!",
+            "You're welcome! ⚡ I love helping people navigate the crypto space. Come back anytime!"
+        ]
+    
+    # Basic greetings (hi, hello, hey)
+    elif any(word in query_lower for word in ["hi", "hello", "hey", "hiya", "howdy"]):
+        if is_returning:
+            responses = [
+                "Hey there! 👋 Welcome back! Ready for another round of Web3 research?",
+                "Hello again! 🔄 Great to see you back. What crypto mysteries shall we solve today?",
+                "Hi! 🌟 Nice to have you back for more blockchain exploration. What's your research focus this time?",
+                "Hey! ⚡ Welcome back to the crypto research hub. What are we diving into today?"
+            ]
+        else:
+            responses = [
+                "Hello! 👋 Welcome to your Web3 Research Assistant! I can help you analyze crypto markets, DeFi protocols, blockchain data, and much more. What would you like to explore?",
+                "Hi there! 🚀 I'm your AI-powered Web3 researcher. I can access real-time crypto data, analyze market trends, track DeFi yields, and provide comprehensive blockchain insights. What interests you today?",
+                "Hey! 💫 Great to meet you! I specialize in Web3 research and can help with everything from token analysis to DeFi protocol deep-dives. What crypto topic are you curious about?",
+                "Hello! ⚡ I'm here to help you navigate the crypto universe with data-driven insights. Whether it's market analysis, protocol research, or blockchain metrics - I've got you covered. What shall we explore first?"
+            ]
+    
+    # Goodbye
+    elif any(word in query_lower for word in ["bye", "goodbye", "see you", "catch you later", "take care"]):
+        responses = [
+            "Goodbye! 👋 Thanks for exploring Web3 with me today. Come back anytime for more crypto insights!",
+            "Take care! 🌟 Hope the research was helpful. I'll be here whenever you need more blockchain analysis!",
+            "See you later! 🚀 Keep those crypto curiosities coming - I'm always ready to help!",
+            "Farewell! ⚡ May your crypto journey be profitable and your DeFi yields be high! Come back soon!"
+        ]
+    
+    # Default friendly response
+    else:
+        responses = [
+            "Hello! 😊 I'm your Web3 Research Assistant, powered by AI and connected to live crypto data. How can I help you today?",
+            "Hi there! 🤖 Ready to explore the crypto universe together? I can analyze markets, track protocols, and provide blockchain insights!",
+            "Greetings! 🌟 I'm here to help with all your Web3 research needs. What crypto topic interests you today?"
+        ]
+    
+    # Return a random response from the appropriate category
+    import random
+    return random.choice(responses)
+
+# =============================
 # Data Models
 # =============================
 class ResearchRequest:
@@ -2238,7 +2374,76 @@ USER QUERY ADAPTATION:
         citations = []
         data_sources_used = []
         
-        # Analyze query intent early for better processing
+        # Check if this is a greeting first (bypass API analysis for greetings)
+        if detect_greeting(request.query):
+            try:
+                # Update session ID if provided in request
+                if request.session_id and request.session_id != self.session_id:
+                    self.session_id = request.session_id
+                    self.session = session_manager.get_or_create_session(request.session_id)
+                
+                # Get session context for personalized greeting
+                session_context = self.session
+                
+                # Generate greeting response
+                greeting_response = get_greeting_response(request.query, session_context)
+                
+                # Update session chat history for greetings too
+                chat_history = self.session["chat_history"]
+                chat_history.add_user_message(request.query)
+                chat_history.add_ai_message(greeting_response)
+                
+                # Update session context
+                self.session["message_count"] = len(chat_history.messages)
+                session_manager.update_session_context(self.session_id, {
+                    "last_query": request.query,
+                    "last_result": greeting_response,
+                    "query_intent": "greeting",
+                    "data_sources": []
+                })
+                
+                execution_time = (datetime.now() - start_time).total_seconds()
+                
+                return {
+                    "success": True,
+                    "result": greeting_response,
+                    "reasoning_steps": ["Detected greeting message - provided friendly AI response"],
+                    "citations": [],
+                    "data_sources_used": [],
+                    "execution_time": execution_time,
+                    "query_intent": "greeting",
+                    "session_id": self.session_id,
+                    "completeness_score": 1.0,  # Greetings are always complete
+                    "metadata": {
+                        "is_greeting": True,
+                        "api_calls_made": 0,
+                        "sources_used": [],
+                        "response_type": "greeting"
+                    }
+                }
+                
+            except Exception as e:
+                logger.error(f"Error handling greeting: {str(e)}")
+                # Fallback to a simple greeting if there's an error
+                return {
+                    "success": True,
+                    "result": "Hello! 👋 I'm your Web3 Research Assistant. How can I help you today?",
+                    "reasoning_steps": ["Greeting detected - provided fallback response"],
+                    "citations": [],
+                    "data_sources_used": [],
+                    "execution_time": (datetime.now() - start_time).total_seconds(),
+                    "query_intent": "greeting",
+                    "session_id": self.session_id,
+                    "completeness_score": 1.0,
+                    "metadata": {
+                        "is_greeting": True,
+                        "api_calls_made": 0,
+                        "sources_used": [],
+                        "response_type": "greeting_fallback"
+                    }
+                }
+        
+        # Analyze query intent early for better processing (non-greeting queries)
         query_lower = request.query.lower()
         query_intent = "general"
         
@@ -3148,6 +3353,9 @@ async def main():
     print("  ⚖️ Comparison Queries:")
     print("    • 'Compare Bitcoin vs Ethereum performance'")
     print("    • 'Solana vs Cardano technical differences'")
+    print("  🤖 Greetings & Casual Chat:")
+    print("    • 'Hi', 'Hello', 'Good morning', 'How are you?'")
+    print("    • 'What's up?', 'Thanks', 'Goodbye'")
     print("\n⚡ Enhanced Features:")
     print("  • 🔗 Intelligent data merging from multiple sources")
     print("  • 📊 Automated data quality scoring and validation")
@@ -3158,6 +3366,7 @@ async def main():
     print("  • ⚡ Real-time cryptocurrency information with automated CMC ID resolution")
     print("  • 🔧 Advanced technical data analysis and visualization")
     print("  • 📚 Comprehensive source citations and data transparency")
+    print("  • 🤖 Smart greeting detection with friendly AI responses")
     print("\n📝 Commands: Type 'quit', 'exit', or 'q' to end session")
     print("=" * 80)
     
@@ -3189,15 +3398,27 @@ async def main():
                 print("Please enter a valid query.")
                 continue
             
-            # Optional: get address
-            address = input("Enter wallet address (optional, press Enter to skip): ").strip()
-            if not address:
-                address = None
+            # Check if this is a greeting - skip additional prompts for greetings
+            is_greeting = detect_greeting(query)
             
-            # Optional: get time range
-            time_range = input("Enter time range (1d/7d/30d/90d, default 7d): ").strip()
-            if not time_range:
+            if is_greeting:
+                # For greetings, use default values and skip prompts
+                address = None
                 time_range = "7d"
+                print("\n💭 Processing greeting...")
+            else:
+                # Optional: get address for non-greetings
+                address = input("Enter wallet address (optional, press Enter to skip): ").strip()
+                if not address:
+                    address = None
+                
+                # Optional: get time range for non-greetings
+                time_range = input("Enter time range (1d/7d/30d/90d, default 7d): ").strip()
+                if not time_range:
+                    time_range = "7d"
+                
+                print("\n🔍 Starting research...")
+                print("🔄 Analyzing query and selecting appropriate tools...")
             
             # Create research request with session ID
             request = ResearchRequest(
@@ -3208,8 +3429,6 @@ async def main():
                 session_id=cli_session_id
             )
             
-            print("\n🔍 Starting research...")
-            print("🔄 Analyzing query and selecting appropriate tools...")
             start_time = datetime.now()
             
             try:
@@ -3225,129 +3444,140 @@ async def main():
                     session_stats["data_sources_used"].update(result.get("data_sources_used", []))
                 
                 if result["success"]:
-                    print(f"\n✅ Research completed in {execution_time:.2f} seconds")
-                    print("\n" + "="*80)
-                    print("� RESEARCH RESULTS")
-                    print("="*80)
-                    
-                    # Show query intent analysis
                     query_intent = result.get("query_intent", "general")
-                    intent_emoji = {
-                        "analysis": "📊",
-                        "information": "ℹ️", 
-                        "market_data": "📈",
-                        "technical": "🔧",
-                        "comparison": "⚖️",
-                        "general": "🔍"
-                    }
-                    print(f"🎯 Query Intent: {intent_emoji.get(query_intent, '🔍')} {query_intent.replace('_', ' ').title()}")
                     
-                    # Show conversation context if available
-                    session = research_agent.session
-                    if session["message_count"] > 0:
-                        print(f"💬 Conversation Context: Building on {session['message_count']} previous messages")
-                    
-                    # Show data quality score
-                    data_quality_score = result.get("data_quality_score", 0)
-                    if data_quality_score >= 80:
-                        quality_indicator = "🟢 Excellent"
-                    elif data_quality_score >= 60:
-                        quality_indicator = "🟡 Good"
-                    elif data_quality_score >= 40:
-                        quality_indicator = "🟠 Fair"
+                    # Handle greeting responses differently
+                    if query_intent == "greeting":
+                        print(f"\n💬 Response ready in {execution_time:.3f} seconds")
+                        print("\n" + "="*60)
+                        print("🤖 AI ASSISTANT")
+                        print("="*60)
+                        print(result["result"])
+                        print("="*60)
                     else:
-                        quality_indicator = "🔴 Limited"
-                    print(f"📊 Data Quality: {quality_indicator} ({data_quality_score:.0f}%)")
+                        # Standard research results display
+                        print(f"\n✅ Research completed in {execution_time:.2f} seconds")
+                        print("\n" + "="*80)
+                        print("📋 RESEARCH RESULTS")
+                        print("="*80)
+                        
+                        # Show query intent analysis
+                        intent_emoji = {
+                            "analysis": "📊",
+                            "information": "ℹ️", 
+                            "market_data": "📈",
+                            "technical": "🔧",
+                            "comparison": "⚖️",
+                            "general": "🔍"
+                        }
+                        print(f"🎯 Query Intent: {intent_emoji.get(query_intent, '🔍')} {query_intent.replace('_', ' ').title()}")
+                        
+                        # Show conversation context if available
+                        session = research_agent.session
+                        if session["message_count"] > 0:
+                            print(f"💬 Conversation Context: Building on {session['message_count']} previous messages")
+                        
+                        # Show data quality score
+                        data_quality_score = result.get("data_quality_score", 0)
+                        if data_quality_score >= 80:
+                            quality_indicator = "🟢 Excellent"
+                        elif data_quality_score >= 60:
+                            quality_indicator = "🟡 Good"
+                        elif data_quality_score >= 40:
+                            quality_indicator = "🟠 Fair"
+                        else:
+                            quality_indicator = "🔴 Limited"
+                        print(f"📊 Data Quality: {quality_indicator} ({data_quality_score:.0f}%)")
+                        
+                        # Show merged data summary if available
+                        merged_data = result.get("merged_data", {})
+                        if merged_data:
+                            primary_count = len(merged_data.get("primary_data", {}))
+                            supplementary_count = len(merged_data.get("supplementary_data", {}))
+                            sources_used = merged_data.get("metadata", {}).get("sources_used", [])
+                            print(f"🔗 Data Integration: {primary_count} primary + {supplementary_count} supplementary datasets from {len(sources_used)} sources")
+                        
+                        # Main analysis result (now with intelligent formatting)
+                        print(result["result"])
+                        print("-" * 50)
                     
-                    # Show merged data summary if available
-                    merged_data = result.get("merged_data", {})
-                    if merged_data:
-                        primary_count = len(merged_data.get("primary_data", {}))
-                        supplementary_count = len(merged_data.get("supplementary_data", {}))
-                        sources_used = merged_data.get("metadata", {}).get("sources_used", [])
-                        print(f"🔗 Data Integration: {primary_count} primary + {supplementary_count} supplementary datasets from {len(sources_used)} sources")
-                    
-                    # Main analysis result (now with intelligent formatting)
-                    print(result["result"])
-                    print("-" * 50)
-                    
-                    # Data sources used
-                    if result.get("data_sources_used"):
-                        print(f"\n📈 Data Sources Used:")
-                        for source in result["data_sources_used"]:
-                            print(f"  ✓ {source.replace('_', ' ').title()}")
-                    
-                    # Detailed tool results
-                    if result.get("tool_results"):
-                        print(f"\n🔧 Detailed Tool Results:")
-                        for i, tool_result in enumerate(result["tool_results"], 1):
-                            if tool_result.get("success"):
-                                source = tool_result.get("source", f"Tool {i}")
-                                print(f"\n  {i}. {source.replace('_', ' ').title()}:")
-                                
-                                # Format the data based on source
-                                data = tool_result.get("data", {})
-                                if source == "etherscan":
-                                    _format_etherscan_data(data)
-                                elif source in ["coinmarketcap", "coinmarketcap_mock", "coinmarketcap_info"]:
-                                    if source == "coinmarketcap_mock":
-                                        print("     📝 Note: Using sample data (API unavailable)")
-                                    _format_coinmarketcap_data(data)
-                                elif source in ["dune_analytics"]:
-                                    _format_dune_data(data)
+                        # Data sources used
+                        if result.get("data_sources_used"):
+                            print(f"\n📈 Data Sources Used:")
+                            for source in result["data_sources_used"]:
+                                print(f"  ✓ {source.replace('_', ' ').title()}")
+                        
+                        # Detailed tool results
+                        if result.get("tool_results"):
+                            print(f"\n🔧 Detailed Tool Results:")
+                            for i, tool_result in enumerate(result["tool_results"], 1):
+                                if tool_result.get("success"):
+                                    source = tool_result.get("source", f"Tool {i}")
+                                    print(f"\n  {i}. {source.replace('_', ' ').title()}:")
+                                    
+                                    # Format the data based on source
+                                    data = tool_result.get("data", {})
+                                    if source == "etherscan":
+                                        _format_etherscan_data(data)
+                                    elif source in ["coinmarketcap", "coinmarketcap_mock", "coinmarketcap_info"]:
+                                        if source == "coinmarketcap_mock":
+                                            print("     📝 Note: Using sample data (API unavailable)")
+                                        _format_coinmarketcap_data(data)
+                                    elif source in ["dune_analytics"]:
+                                        _format_dune_data(data)
+                                    else:
+                                        # Generic data formatting
+                                        if isinstance(data, dict):
+                                            for key, value in list(data.items())[:5]:  # Show first 5 items
+                                                print(f"     {key}: {str(value)[:100]}{'...' if len(str(value)) > 100 else ''}")
+                                        elif isinstance(data, list) and data:
+                                            print(f"     Records found: {len(data)}")
+                                            if len(data) > 0:
+                                                print(f"     Sample: {str(data[0])[:100]}{'...' if len(str(data[0])) > 100 else ''}")
                                 else:
-                                    # Generic data formatting
-                                    if isinstance(data, dict):
-                                        for key, value in list(data.items())[:5]:  # Show first 5 items
-                                            print(f"     {key}: {str(value)[:100]}{'...' if len(str(value)) > 100 else ''}")
-                                    elif isinstance(data, list) and data:
-                                        print(f"     Records found: {len(data)}")
-                                        if len(data) > 0:
-                                            print(f"     Sample: {str(data[0])[:100]}{'...' if len(str(data[0])) > 100 else ''}")
-                            else:
-                                error = tool_result.get("error", "Unknown error")
-                                print(f"\n  {i}. ❌ Tool failed: {error}")
-                    
-                    # Reasoning steps
-                    if result.get("reasoning_steps"):
-                        print(f"\n🧠 Research Process:")
-                        for i, step in enumerate(result["reasoning_steps"], 1):
-                            print(f"  {i}. {step}")
-                    
-                    # Citations with timestamps
-                    if result.get("citations"):
-                        print(f"\n📚 Sources & Citations:")
-                        for citation in result["citations"]:
-                            timestamp = citation.get("timestamp", "")
-                            if timestamp:
-                                # Format timestamp nicely
-                                try:
-                                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-                                except:
-                                    formatted_time = timestamp
-                                print(f"  📖 {citation['source']} (Retrieved: {formatted_time})")
-                            else:
-                                print(f"  📖 {citation['source']}")
-                    
-                    # Performance metrics
-                    print(f"\n⚡ Performance Metrics:")
-                    print(f"  • Execution Time: {execution_time:.2f} seconds")
-                    print(f"  • Tools Used: {len(result.get('tool_results', []))}")
-                    success_count = len([r for r in result.get('tool_results', []) if r.get('success')])
-                    total_tools = max(len(result.get('tool_results', [])), 1)
-                    print(f"  • Success Rate: {success_count / total_tools * 100:.1f}%")
-                    
-                    # Quick summary
-                    print(f"\n📋 Quick Summary:")
-                    summary_lines = result["result"].split('\n')[:3]  # First 3 lines
-                    for line in summary_lines:
-                        if line.strip():
-                            print(f"  • {line.strip()}")
-                    
-                    print("\n" + "="*80)
-                    print("💡 Tip: You can ask follow-up questions or analyze different addresses!")
-                    print("="*80)
+                                    error = tool_result.get("error", "Unknown error")
+                                    print(f"\n  {i}. ❌ Tool failed: {error}")
+                        
+                        # Reasoning steps
+                        if result.get("reasoning_steps"):
+                            print(f"\n🧠 Research Process:")
+                            for i, step in enumerate(result["reasoning_steps"], 1):
+                                print(f"  {i}. {step}")
+                        
+                        # Citations with timestamps
+                        if result.get("citations"):
+                            print(f"\n📚 Sources & Citations:")
+                            for citation in result["citations"]:
+                                timestamp = citation.get("timestamp", "")
+                                if timestamp:
+                                    # Format timestamp nicely
+                                    try:
+                                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                                    except:
+                                        formatted_time = timestamp
+                                    print(f"  📖 {citation['source']} (Retrieved: {formatted_time})")
+                                else:
+                                    print(f"  📖 {citation['source']}")
+                        
+                        # Performance metrics
+                        print(f"\n⚡ Performance Metrics:")
+                        print(f"  • Execution Time: {execution_time:.2f} seconds")
+                        print(f"  • Tools Used: {len(result.get('tool_results', []))}")
+                        success_count = len([r for r in result.get('tool_results', []) if r.get('success')])
+                        total_tools = max(len(result.get('tool_results', [])), 1)
+                        print(f"  • Success Rate: {success_count / total_tools * 100:.1f}%")
+                        
+                        # Quick summary
+                        print(f"\n📋 Quick Summary:")
+                        summary_lines = result["result"].split('\n')[:3]  # First 3 lines
+                        for line in summary_lines:
+                            if line.strip():
+                                print(f"  • {line.strip()}")
+                        
+                        print("\n" + "="*80)
+                        print("💡 Tip: You can ask follow-up questions or analyze different addresses!")
+                        print("="*80)
                 
                 else:
                     print(f"\n❌ Research failed: {result.get('error', 'Unknown error')}")
