@@ -332,11 +332,9 @@ export default function MainChat() {
       const assistantMessage: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        text: isGreeting 
-          ? (normalized.result || normalized.data) // For greetings, show the AI response directly
-          : normalized.success
-            ? 'Here are the insights I found. You can explore the visualization below or download the data.'
-            : `There was an issue completing the research.`,
+        text: normalized.success
+          ? (normalized.result || normalized.data || 'Research completed successfully.')
+          : `There was an issue completing the research.`,
         timestamp: new Date().toISOString(),
         result: isGreeting ? undefined : normalized, // Don't attach result for greetings
       };
