@@ -298,14 +298,21 @@ export default function MainChat() {
         session_id: data.session_id || sessionId,
       };
 
+      // Check if this is a greeting response (no API calls, greeting intent)
+      const isGreeting = normalized.success && 
+                        normalized.query_intent === 'greeting' && 
+                        (!normalized.data_sources_used || normalized.data_sources_used.length === 0);
+
       const assistantMessage: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        text: normalized.success
-          ? 'Here are the insights I found. You can explore the visualization below or download the data.'
-          : `There was an issue completing the research.`,
+        text: isGreeting 
+          ? (normalized.result || normalized.data) // For greetings, show the AI response directly
+          : normalized.success
+            ? 'Here are the insights I found. You can explore the visualization below or download the data.'
+            : `There was an issue completing the research.`,
         timestamp: new Date().toISOString(),
-        result: normalized,
+        result: isGreeting ? undefined : normalized, // Don't attach result for greetings
       };
 
       // Add the new message to the existing messages (don't reload history)
@@ -761,7 +768,9 @@ export default function MainChat() {
                   }}
                 >
                   <div className="text-xs sm:text-sm text-white/50 mb-1 sm:mb-2">
-                    {m.role === 'user' ? 'You' : 'AIRAA'} • {new Date(m.timestamp).toLocaleTimeString()}
+                    {m.role === 'user' ? 'You' : 'AIRAA'} 
+                    {m.role === 'assistant' && !m.result && ' 💬'} {/* Greeting indicator */}
+                    • {new Date(m.timestamp).toLocaleTimeString()}
                   </div>
                   {m.text && (
                     <div className={`whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px] md:text-base ${m.role === 'user' ? '' : 'font-[var(--font-jp)]'}`}>{m.text}</div>
