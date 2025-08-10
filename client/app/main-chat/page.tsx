@@ -69,6 +69,7 @@ interface ConversationHistory {
     type: 'human' | 'ai';
     content: string;
     timestamp: string;
+    research_data?: ResearchResult; // Research data for AI messages
   }>;
   message_count: number;
   created_at: string;
@@ -174,12 +175,37 @@ export default function MainChat() {
                 timestamp: msg.timestamp,
               };
             } else {
-              // For AI messages, show the actual content directly without result wrapper
+              // For AI messages, use research_data if available, otherwise treat as greeting
+              let aiText = msg.content;
+              let result: ResearchResult | undefined = undefined;
+
+              if (msg.research_data) {
+                // Use the stored research data to recreate the full result
+                result = {
+                  ...msg.research_data,
+                  timestamp: msg.timestamp,
+                  session_id: sessionId
+                };
+                
+                // Check if this is a greeting response (no API calls, greeting intent)
+                const isGreeting = result.success && 
+                                  result.query_intent === 'greeting' && 
+                                  (!result.data_sources_used || result.data_sources_used.length === 0);
+                
+                if (!isGreeting) {
+                  aiText = 'Here are the insights I found. You can explore the visualization below or download the data.';
+                }
+              } else {
+                // No research data available - this is likely a greeting or simple response
+                result = undefined;
+              }
+
               return {
                 id: `restored-${sessionId}-${index}`,
                 role: 'assistant' as ChatRole,
-                text: msg.content,
+                text: aiText,
                 timestamp: msg.timestamp,
+                result: result
               };
             }
           });

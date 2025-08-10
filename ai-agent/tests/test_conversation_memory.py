@@ -4,6 +4,9 @@ Test script to verify conversation memory functionality
 """
 
 import asyncio
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from main import OptimizedWeb3ResearchAgent, ResearchRequest, init_http_client, session_manager
 
 async def test_conversation_memory():
@@ -29,6 +32,8 @@ async def test_conversation_memory():
     result1 = await agent.research(request1)
     print(f"✅ First query completed. Success: {result1['success']}")
     print(f"📊 Messages in session: {agent.session['message_count']}")
+    if result1['success']:
+        print(f"📄 First response preview: {result1['result'][:100]}...")
     
     # Second query (should reference first)
     print("\n📝 Second Query: Follow-up question...")
@@ -40,6 +45,13 @@ async def test_conversation_memory():
     result2 = await agent.research(request2)
     print(f"✅ Second query completed. Success: {result2['success']}")
     print(f"📊 Messages in session: {agent.session['message_count']}")
+    if result2['success']:
+        print(f"📄 Second response preview: {result2['result'][:200]}...")
+        # Check if the response references Bitcoin or previous context
+        if any(keyword.lower() in result2['result'].lower() for keyword in ['bitcoin', 'btc', 'previous', 'earlier', 'mentioned']):
+            print("✅ SUCCESS: AI appears to be referencing conversation context!")
+        else:
+            print("⚠️  WARNING: AI may not be using conversation context properly")
     
     # Check conversation history
     print("\n💬 Conversation History:")

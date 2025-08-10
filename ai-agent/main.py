@@ -2468,11 +2468,17 @@ USER QUERY ADAPTATION:
             chat_history = self.session["chat_history"]
             conversation_summary = session_manager.get_conversation_summary(self.session_id)
             
+            # Add current user message to chat history BEFORE processing
+            current_time = datetime.now().isoformat()
+            user_msg = HumanMessage(content=request.query)
+            user_msg.additional_kwargs = {"timestamp": current_time}
+            chat_history.add_message(user_msg)
+            
             # Add conversation context to reasoning
             if conversation_summary:
                 reasoning_steps.append(f"Referencing conversation history: {len(chat_history.messages)} previous messages")
             
-            # Prepare context with session memory
+            # Prepare context with session memory (now includes current query)
             context = {
                 "query": request.query,
                 "address": request.address or "Not specified",
@@ -2518,9 +2524,22 @@ USER QUERY ADAPTATION:
             # Apply intelligent formatting based on query intent and data quality
             final_result = self._format_final_result(raw_result, query_intent, merged_data)
             
-            # Update session chat history
-            chat_history.add_user_message(request.query)
-            chat_history.add_ai_message(final_result)
+            # Add AI response to chat history with research data
+            ai_msg = AIMessage(content=final_result)
+            ai_msg.additional_kwargs = {
+                "timestamp": datetime.now().isoformat(),
+                "research_data": {
+                    "success": True,
+                    "result": final_result,
+                    "reasoning_steps": reasoning_steps,
+                    "citations": citations,
+                    "data_sources_used": list(set(data_sources_used)),
+                    "query_intent": query_intent,
+                    "merged_data": merged_data,
+                    "data_quality_score": merged_data.get("metadata", {}).get("completeness_score", 0)
+                }
+            }
+            chat_history.add_message(ai_msg)
             
             # Update session context
             self.session["message_count"] = len(chat_history.messages)
@@ -2725,6 +2744,17 @@ USER QUERY ADAPTATION:
             f"Preferred Format: {format_preference}",
             f"User Context: The user is asking for {query_intent} information and expects a {format_preference} style response."
         ]
+        
+        # Add conversation context if available
+        conversation_summary = session_manager.get_conversation_summary(self.session_id)
+        if conversation_summary:
+            context_parts.append("\n💬 === CONVERSATION HISTORY ===")
+            context_parts.append("IMPORTANT: Reference and build upon the following previous conversation:")
+            context_parts.append(conversation_summary)
+            context_parts.append("Connect this current query to the conversation history when relevant.")
+            context_parts.append("If this is a follow-up question, reference previous answers and provide context.")
+            context_parts.append("Maintain consistency with previous recommendations unless new data suggests changes.")
+            context_parts.append("=== END CONVERSATION HISTORY ===\n")
         
         if request.address:
             context_parts.append(f"Address Analyzed: {request.address}")

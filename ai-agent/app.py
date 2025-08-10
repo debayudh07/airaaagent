@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
@@ -137,13 +137,29 @@ def create_app() -> Flask:
             
             # Convert messages to serializable format
             messages = []
-            for msg in chat_history.messages:
+            for i, msg in enumerate(chat_history.messages):
                 if hasattr(msg, 'content'):
-                    messages.append({
+                    # Try to get individual message timestamp, fallback to incremental timestamps
+                    if hasattr(msg, 'additional_kwargs') and 'timestamp' in msg.additional_kwargs:
+                        timestamp = msg.additional_kwargs['timestamp']
+                    else:
+                        # Create incremental timestamps based on creation time
+                        base_time = session.get("created_at", datetime.now())
+                        timestamp = (base_time + timedelta(minutes=i)).isoformat()
+                    
+                    msg_data = {
                         "type": "human" if msg.__class__.__name__ == "HumanMessage" else "ai",
                         "content": msg.content,
-                        "timestamp": session.get("last_activity", datetime.now()).isoformat()
-                    })
+                        "timestamp": timestamp
+                    }
+                    
+                    # Include research metadata for AI messages if available
+                    if msg.__class__.__name__ == "AIMessage" and hasattr(msg, 'additional_kwargs'):
+                        research_data = msg.additional_kwargs.get('research_data')
+                        if research_data:
+                            msg_data['research_data'] = research_data
+                    
+                    messages.append(msg_data)
             
             return jsonify({
                 "success": True,
