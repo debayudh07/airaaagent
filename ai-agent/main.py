@@ -2,8 +2,9 @@ import os
 import asyncio
 import logging
 import re
+import uuid
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 import httpx
@@ -47,11 +48,101 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Data Models
 # =============================
 class ResearchRequest:
-    def __init__(self, query: str, address: str = None, time_range: str = "7d", data_sources: List[str] = None):
+    def __init__(self, query: str, address: str = None, time_range: str = "7d", data_sources: List[str] = None, session_id: str = None):
         self.query = query
         self.address = address
         self.time_range = time_range
         self.data_sources = data_sources or ["dune", "etherscan", "coinmarketcap"]
+        self.session_id = session_id or str(uuid.uuid4())
+
+# =============================
+# Session Management
+# =============================
+class ConversationSessionManager:
+    """Manages conversation sessions with memory"""
+    
+    def __init__(self, max_sessions: int = 100, session_timeout_hours: int = 24):
+        self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.max_sessions = max_sessions
+        self.session_timeout = timedelta(hours=session_timeout_hours)
+        
+    def get_or_create_session(self, session_id: str = None) -> Dict[str, Any]:
+        """Get existing session or create new one"""
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            
+        # Clean up expired sessions
+        self._cleanup_expired_sessions()
+        
+        if session_id not in self.sessions:
+            # Create new session
+            self.sessions[session_id] = {
+                "id": session_id,
+                "chat_history": ChatMessageHistory(),
+                "created_at": datetime.now(),
+                "last_activity": datetime.now(),
+                "message_count": 0,
+                "context_summary": "",
+                "research_context": {}
+            }
+            logger.info(f"Created new conversation session: {session_id}")
+        else:
+            # Update last activity
+            self.sessions[session_id]["last_activity"] = datetime.now()
+            
+        return self.sessions[session_id]
+    
+    def update_session_context(self, session_id: str, context: Dict[str, Any]):
+        """Update session context with research data"""
+        if session_id in self.sessions:
+            self.sessions[session_id]["research_context"].update(context)
+            self.sessions[session_id]["last_activity"] = datetime.now()
+    
+    def _cleanup_expired_sessions(self):
+        """Remove expired sessions"""
+        current_time = datetime.now()
+        expired_sessions = [
+            session_id for session_id, session in self.sessions.items()
+            if current_time - session["last_activity"] > self.session_timeout
+        ]
+        
+        for session_id in expired_sessions:
+            del self.sessions[session_id]
+            logger.info(f"Cleaned up expired session: {session_id}")
+        
+        # If we have too many sessions, remove oldest ones
+        if len(self.sessions) > self.max_sessions:
+            sorted_sessions = sorted(
+                self.sessions.items(),
+                key=lambda x: x[1]["last_activity"]
+            )
+            sessions_to_remove = len(self.sessions) - self.max_sessions
+            for session_id, _ in sorted_sessions[:sessions_to_remove]:
+                del self.sessions[session_id]
+                logger.info(f"Cleaned up old session due to limit: {session_id}")
+    
+    def get_conversation_summary(self, session_id: str, max_messages: int = 10) -> str:
+        """Generate a summary of recent conversation for context"""
+        if session_id not in self.sessions:
+            return ""
+            
+        chat_history = self.sessions[session_id]["chat_history"]
+        messages = chat_history.messages[-max_messages:] if chat_history.messages else []
+        
+        if not messages:
+            return ""
+        
+        summary_parts = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                summary_parts.append(f"User asked: {msg.content[:100]}...")
+            elif isinstance(msg, AIMessage):
+                summary_parts.append(f"AI responded about: {msg.content[:100]}...")
+        
+        return "\n".join(summary_parts)
+
+# Global session manager
+session_manager = ConversationSessionManager()
 
 # =============================
 # Globals
@@ -1416,9 +1507,9 @@ async def coinmarketcap_tool(query: str) -> Dict[str, Any]:
 
 # Modern LangChain Research Chain
 class OptimizedWeb3ResearchAgent:
-    """Optimized Web3 research agent using modern LangChain patterns"""
+    """Optimized Web3 research agent using modern LangChain patterns with session-based memory"""
     
-    def __init__(self):
+    def __init__(self, session_id: str = None):
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",
             google_api_key=GEMINI_API_KEY,
@@ -1434,27 +1525,37 @@ class OptimizedWeb3ResearchAgent:
             coinmarketcap_tool
         ]
         
+        # Session management
+        self.session_id = session_id
+        self.session = session_manager.get_or_create_session(session_id)
+        
         # Create research chain
         self.research_chain = self._create_research_chain()
-        
-        # Chat history for context
-        self.chat_history = ChatMessageHistory()
     
     def _create_research_chain(self):
         """Create optimized research chain using LCEL (LangChain Expression Language)"""
         
         # System prompt
-        system_prompt = """You are an expert Web3 research analyst with advanced data integration capabilities. You excel at merging information from multiple sources and creating comprehensive, professional research reports tailored to user-specific requests.
+        system_prompt = """You are an expert Web3 research analyst with advanced data integration capabilities and conversation memory. You excel at merging information from multiple sources and creating comprehensive, professional research reports tailored to user-specific requests, while maintaining context from previous conversations.
 
 CORE RESPONSIBILITIES:
 1. **User-Centric Analysis**: Analyze and respond EXACTLY according to what the user asks and specifies
-2. **Adaptive Formatting**: Adjust response structure, depth, and focus based on user's specific query
-3. **Comprehensive Data Integration**: Use ALL available data sources to provide complete insights
-4. **Professional Presentation**: Create well-structured, readable reports with clear sections
-5. **Data Validation**: Cross-reference information from multiple sources
-6. **Actionable Insights**: Provide specific recommendations based on data analysis
-7. **Source Attribution**: Always cite data sources and provide transparency
-8. **Follow-up Engagement**: Suggest relevant follow-up questions to deepen analysis
+2. **Conversation Continuity**: Reference and build upon previous conversation history when relevant
+3. **Adaptive Formatting**: Adjust response structure, depth, and focus based on user's specific query
+4. **Comprehensive Data Integration**: Use ALL available data sources to provide complete insights
+5. **Professional Presentation**: Create well-structured, readable reports with clear sections
+6. **Data Validation**: Cross-reference information from multiple sources
+7. **Actionable Insights**: Provide specific recommendations based on data analysis
+8. **Source Attribution**: Always cite data sources and provide transparency
+9. **Follow-up Engagement**: Suggest relevant follow-up questions to deepen analysis
+
+CONVERSATION MEMORY GUIDELINES:
+- Always check conversation history for relevant context from previous exchanges
+- Reference previous analyses, recommendations, or data when applicable
+- Build upon previously discussed topics instead of repeating information
+- If user asks follow-up questions, connect them to earlier conversation points
+- Acknowledge when you're providing updates to previously discussed topics
+- Maintain consistency with previous recommendations unless new data suggests changes
 
 Available Tools & Data Sources:
 - dune_analytics_tool: Blockchain metrics, trading volumes, DEX data, network analytics
@@ -2153,13 +2254,26 @@ USER QUERY ADAPTATION:
             query_intent = "technical"
         
         try:
-            # Prepare context
+            # Update session ID if provided in request
+            if request.session_id and request.session_id != self.session_id:
+                self.session_id = request.session_id
+                self.session = session_manager.get_or_create_session(request.session_id)
+            
+            # Get conversation history and context
+            chat_history = self.session["chat_history"]
+            conversation_summary = session_manager.get_conversation_summary(self.session_id)
+            
+            # Add conversation context to reasoning
+            if conversation_summary:
+                reasoning_steps.append(f"Referencing conversation history: {len(chat_history.messages)} previous messages")
+            
+            # Prepare context with session memory
             context = {
                 "query": request.query,
                 "address": request.address or "Not specified",
                 "time_range": request.time_range,
                 "data_sources": ", ".join(request.data_sources),
-                "chat_history": self.chat_history.messages
+                "chat_history": chat_history.messages
             }
             
             reasoning_steps.append(f"Analyzing query and planning approach (Intent: {query_intent})")
@@ -2190,7 +2304,7 @@ USER QUERY ADAPTATION:
                 "address": request.address or "Not specified", 
                 "time_range": request.time_range,
                 "data_sources": ", ".join(merged_data.get("metadata", {}).get("sources_used", [])),
-                "chat_history": self.chat_history.messages,
+                "chat_history": chat_history.messages,
                 "synthesis_context": synthesis_prompt
             }
             
@@ -2199,9 +2313,18 @@ USER QUERY ADAPTATION:
             # Apply intelligent formatting based on query intent and data quality
             final_result = self._format_final_result(raw_result, query_intent, merged_data)
             
-            # Update chat history
-            self.chat_history.add_user_message(request.query)
-            self.chat_history.add_ai_message(final_result)
+            # Update session chat history
+            chat_history.add_user_message(request.query)
+            chat_history.add_ai_message(final_result)
+            
+            # Update session context
+            self.session["message_count"] = len(chat_history.messages)
+            session_manager.update_session_context(self.session_id, {
+                "last_query": request.query,
+                "last_result": final_result,
+                "query_intent": query_intent,
+                "data_sources": data_sources_used
+            })
             
             # Create citations
             citations = [
@@ -2753,8 +2876,9 @@ USER QUERY ADAPTATION:
         
         return "\n".join(context_parts)
 
-# Initialize research agent
-research_agent = OptimizedWeb3ResearchAgent()
+# Initialize research agent with CLI session
+cli_session_id = f"cli-{str(uuid.uuid4())[:8]}"
+research_agent = OptimizedWeb3ResearchAgent(session_id=cli_session_id)
 
 # Helper functions for formatting data
 def _format_etherscan_data(data):
@@ -3037,6 +3161,10 @@ async def main():
     print("\n📝 Commands: Type 'quit', 'exit', or 'q' to end session")
     print("=" * 80)
     
+    # Show session information
+    print(f"\n💬 Session ID: {cli_session_id}")
+    print("✨ Conversation memory is active - I'll remember our previous discussions!")
+    
     # Initialize HTTP client
     await init_http_client()
     
@@ -3071,12 +3199,13 @@ async def main():
             if not time_range:
                 time_range = "7d"
             
-            # Create research request
+            # Create research request with session ID
             request = ResearchRequest(
                 query=query,
                 address=address,
                 time_range=time_range,
-                data_sources=["dune", "etherscan", "coinmarketcap"]
+                data_sources=["dune", "etherscan", "coinmarketcap"],
+                session_id=cli_session_id
             )
             
             print("\n🔍 Starting research...")
@@ -3112,6 +3241,11 @@ async def main():
                         "general": "🔍"
                     }
                     print(f"🎯 Query Intent: {intent_emoji.get(query_intent, '🔍')} {query_intent.replace('_', ' ').title()}")
+                    
+                    # Show conversation context if available
+                    session = research_agent.session
+                    if session["message_count"] > 0:
+                        print(f"💬 Conversation Context: Building on {session['message_count']} previous messages")
                     
                     # Show data quality score
                     data_quality_score = result.get("data_quality_score", 0)

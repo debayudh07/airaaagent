@@ -1,6 +1,7 @@
 import os
 import asyncio
 from typing import Optional
+from datetime import datetime
 
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
@@ -85,15 +86,16 @@ def create_app() -> Flask:
             query: str = payload.get("query", "")
             address: Optional[str] = payload.get("address")
             time_range: str = payload.get("time_range", "7d")
+            session_id: Optional[str] = payload.get("session_id")
 
             if not query or not isinstance(query, str):
                 return jsonify({"success": False, "error": "Field 'query' (string) is required"}), 400
 
-            # Create a fresh agent per request to avoid shared chat history across users
-            agent = OptimizedWeb3ResearchAgent()
+            # Create agent with session support for conversation memory
+            agent = OptimizedWeb3ResearchAgent(session_id=session_id)
 
             async def run_research():
-                req = ResearchRequest(query=query, address=address, time_range=time_range)
+                req = ResearchRequest(query=query, address=address, time_range=time_range, session_id=session_id)
                 return await agent.research(req)
 
             # Execute the coroutine
@@ -109,12 +111,82 @@ def create_app() -> Flask:
                     loop.close()
                     asyncio.set_event_loop(None)
 
+            # Add session_id to response for client tracking
+            if result.get("success"):
+                result["session_id"] = agent.session_id
+
             return jsonify(result), 200 if result.get("success") else 502
         except Exception as exc:
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @app.route("/api/research", methods=["OPTIONS"])
     def research_preflight():
+        return make_response("", 200)
+
+    @app.route("/api/conversation/<session_id>", methods=["GET"])
+    def get_conversation(session_id: str):
+        """Get conversation history for a session"""
+        try:
+            from main import session_manager
+            
+            if session_id not in session_manager.sessions:
+                return jsonify({"success": False, "error": "Session not found"}), 404
+            
+            session = session_manager.sessions[session_id]
+            chat_history = session["chat_history"]
+            
+            # Convert messages to serializable format
+            messages = []
+            for msg in chat_history.messages:
+                if hasattr(msg, 'content'):
+                    messages.append({
+                        "type": "human" if msg.__class__.__name__ == "HumanMessage" else "ai",
+                        "content": msg.content,
+                        "timestamp": session.get("last_activity", datetime.now()).isoformat()
+                    })
+            
+            return jsonify({
+                "success": True,
+                "session_id": session_id,
+                "messages": messages,
+                "message_count": len(messages),
+                "created_at": session["created_at"].isoformat(),
+                "last_activity": session["last_activity"].isoformat()
+            })
+            
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/conversation/<session_id>", methods=["OPTIONS"])
+    def conversation_preflight(session_id: str):
+        return make_response("", 200)
+
+    @app.route("/api/sessions", methods=["GET"])
+    def list_sessions():
+        """List all active sessions"""
+        try:
+            from main import session_manager
+            
+            sessions = []
+            for session_id, session in session_manager.sessions.items():
+                sessions.append({
+                    "session_id": session_id,
+                    "message_count": session["message_count"],
+                    "created_at": session["created_at"].isoformat(),
+                    "last_activity": session["last_activity"].isoformat()
+                })
+            
+            return jsonify({
+                "success": True,
+                "sessions": sessions,
+                "total_sessions": len(sessions)
+            })
+            
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/sessions", methods=["OPTIONS"])
+    def sessions_preflight():
         return make_response("", 200)
 
     return app
