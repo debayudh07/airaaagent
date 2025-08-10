@@ -621,78 +621,85 @@ export default function MainChat() {
         waveOpacity={0.8}
       />
       {/* Header with Connect Button */}
-      <header className="relative z-20 max-w-5xl mx-auto px-4 pt-8 pb-4">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+      <header className="relative z-20 max-w-5xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 md:pt-8 pb-3 sm:pb-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 w-full sm:w-auto">
+            <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent leading-tight">
               AIRAA Research Agent
             </h1>
             {sessionId && (
               <button
                 onClick={() => setShowSessionInfo(!showSessionInfo)}
-                className="text-sm px-3 py-1.5 rounded-full border border-white/30 hover:border-white/50 flex items-center gap-2 transition-colors"
+                className="text-xs sm:text-sm px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full border border-white/30 hover:border-white/50 flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
                 title="Session Information"
               >
-                <MessageSquare className="w-4 h-4" />
+                <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="sm:hidden">Active</span>
+                <span className="hidden sm:inline md:hidden">Session</span>
                 <span className="hidden md:inline">Session Active</span>
               </button>
             )}
           </div>
-          <ConnectButton />
+          <div className="w-full sm:w-auto flex justify-end">
+            <ConnectButton />
+          </div>
         </div>
         
         {/* Session Information Panel */}
         {showSessionInfo && sessionId && (
-          <div className="mt-4 rounded-2xl border border-white/20 backdrop-blur-xl bg-white/5 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <MessageSquare className="w-5 h-5" />
-                Conversation Session
+          <div className="mt-3 sm:mt-4 rounded-2xl border border-white/20 backdrop-blur-xl bg-white/5 p-3 sm:p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <h3 className="text-base sm:text-lg font-semibold flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline">Conversation Session</span>
+                <span className="sm:hidden">Session</span>
                 {loadingHistory && <div className="text-xs text-white/60">(Loading...)</div>}
               </h3>
               <button
                 onClick={startNewSession}
-                className="text-sm px-3 py-1.5 rounded-lg border border-white/30 hover:border-white/50 transition-colors"
+                className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/30 hover:border-white/50 transition-colors touch-manipulation self-start sm:self-auto"
               >
                 New Session
               </button>
             </div>
             
-            <div className="grid md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <div className="text-white/60 mb-1">Session ID</div>
-                <div className="font-mono text-white/80 break-all">{sessionId}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
+              <div className="sm:col-span-2 md:col-span-1">
+                <div className="text-white/60 mb-1 text-xs sm:text-sm">Session ID</div>
+                <div className="font-mono text-xs sm:text-sm text-white/80 break-all bg-white/5 rounded-lg p-2">{sessionId}</div>
               </div>
               
               {conversationHistory && (
                 <>
                   <div>
-                    <div className="text-white/60 mb-1 flex items-center gap-1">
-                      <Clock className="w-4 h-4" />
-                      Message History
+                    <div className="text-white/60 mb-1 flex items-center gap-1 text-xs sm:text-sm">
+                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      Messages
                     </div>
-                    <div className="text-white/80">{conversationHistory.message_count} messages</div>
+                    <div className="text-white/80 text-sm">{conversationHistory.message_count} messages</div>
                   </div>
                   
-                  <div>
-                    <div className="text-white/60 mb-1">Created</div>
-                    <div className="text-white/80">{new Date(conversationHistory.created_at).toLocaleString()}</div>
+                  <div className="sm:col-span-2 md:col-span-1">
+                    <div className="text-white/60 mb-1 text-xs sm:text-sm">Created</div>
+                    <div className="text-white/80 text-xs sm:text-sm">{new Date(conversationHistory.created_at).toLocaleString()}</div>
                   </div>
                   
-                  <div>
-                    <div className="text-white/60 mb-1">Last Activity</div>
-                    <div className="text-white/80">{new Date(conversationHistory.last_activity).toLocaleString()}</div>
+                  <div className="sm:col-span-2 md:col-span-1">
+                    <div className="text-white/60 mb-1 text-xs sm:text-sm">Last Activity</div>
+                    <div className="text-white/80 text-xs sm:text-sm">{new Date(conversationHistory.last_activity).toLocaleString()}</div>
                   </div>
                 </>
               )}
             </div>
             
             <div className="mt-3 pt-3 border-t border-white/10">
-              <div className="text-xs text-white/50 flex items-center gap-2">
-                <CheckCircle className="w-4 h-4" />
-                Conversation memory active - I'll remember our previous discussions
+              <div className="text-xs sm:text-sm text-white/50 flex flex-col sm:flex-row sm:items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span>Memory active</span>
+                </div>
                 {conversationHistory && conversationHistory.message_count > 0 && (
-                  <span className="text-green-400">({conversationHistory.message_count} messages loaded)</span>
+                  <span className="text-green-400 text-xs">({conversationHistory.message_count} messages loaded)</span>
                 )}
               </div>
             </div>
@@ -702,31 +709,31 @@ export default function MainChat() {
 
       {!isConnected ? (
         // Wallet Connection Required Screen
-        <main className="relative z-10 max-w-3xl mx-auto px-4 py-16">
-          <div className="text-center space-y-6">
-            <div className="rounded-3xl border border-white/[0.15] hover:border-blue-500/40 transition-colors duration-300 backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.06] shadow-2xl p-8" style={{
+        <main className="relative z-10 max-w-3xl mx-auto px-3 sm:px-4 py-8 sm:py-12 md:py-16">
+          <div className="text-center space-y-4 sm:space-y-6">
+            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.15] hover:border-blue-500/40 transition-colors duration-300 backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.06] shadow-2xl p-6 sm:p-8" style={{
               background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
             }}>
-              <div className="w-16 h-16 mx-auto mb-6 rounded-full border border-white/20 flex items-center justify-center bg-white/5">
-                <Lock className="w-8 h-8 text-white/60" />
+              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 sm:mb-6 rounded-full border border-white/20 flex items-center justify-center bg-white/5">
+                <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-white/60" />
               </div>
-              <h2 className="text-2xl font-semibold mb-3">Connect Your Wallet</h2>
-              <p className="text-white/70 mb-6 leading-relaxed">
+              <h2 className="text-xl sm:text-2xl font-semibold mb-2 sm:mb-3">Connect Your Wallet</h2>
+              <p className="text-sm sm:text-base text-white/70 mb-4 sm:mb-6 leading-relaxed px-2">
                 To access AIRAA's research capabilities and personalized on-chain analytics, 
                 please connect your wallet using the button above.
               </p>
-              <div className="text-sm text-white/50 flex items-center justify-center gap-2">
-                <Lock className="w-4 h-4" />
-                Your wallet connection is secure and only used for address-based analytics
+              <div className="text-xs sm:text-sm text-white/50 flex flex-col sm:flex-row items-center justify-center gap-2">
+                <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="text-center">Your wallet connection is secure and only used for address-based analytics</span>
               </div>
             </div>
           </div>
         </main>
       ) : (
         // Chat Interface (only shown when wallet is connected)
-      <main className="relative z-10 max-w-5xl mx-auto px-4 py-8">
-        <div className="rounded-3xl border border-white/[0.15] hover:border-blue-500/40 transition-colors duration-300 backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.06] shadow-2xl p-6 md:p-8" style={{
+      <main className="relative z-10 max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 md:py-8">
+        <div className="rounded-2xl sm:rounded-3xl border border-white/[0.15] hover:border-blue-500/40 transition-colors duration-300 backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.06] shadow-2xl p-4 sm:p-6 md:p-8" style={{
           background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
         }}>
@@ -734,14 +741,14 @@ export default function MainChat() {
 
           {/* Messages */}
           <div
-            className={`overflow-y-auto pr-1 space-y-4 transition-[height] duration-500 ease-out`}
-            style={{ height: hasUserMessage ? '70vh' : '60vh' }}
+            className={`overflow-y-auto pr-0.5 sm:pr-1 space-y-3 sm:space-y-4 transition-[height] duration-500 ease-out`}
+            style={{ height: hasUserMessage ? '65vh' : '55vh' }}
             id="chat-scroll"
           >
             {messages.map((m) => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`relative max-w-[85%] rounded-2xl border backdrop-blur-xl shadow-lg p-4 ${
+                  className={`relative max-w-[92%] sm:max-w-[85%] rounded-xl sm:rounded-2xl border backdrop-blur-xl shadow-lg p-3 sm:p-4 ${
                     m.role === 'user'
                       ? 'border-white/[0.2] bg-white/[0.08]'
                       : 'border-white/[0.15] bg-white/[0.05]'
@@ -753,18 +760,18 @@ export default function MainChat() {
                     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
                   }}
                 >
-                  <div className="text-sm text-white/50 mb-1">
+                  <div className="text-xs sm:text-sm text-white/50 mb-1 sm:mb-2">
                     {m.role === 'user' ? 'You' : 'AIRAA'} • {new Date(m.timestamp).toLocaleTimeString()}
                   </div>
                   {m.text && (
-                    <div className={`whitespace-pre-wrap leading-relaxed text-[15px] md:text-base ${m.role === 'user' ? '' : 'font-[var(--font-jp)]'}`}>{m.text}</div>
+                    <div className={`whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px] md:text-base ${m.role === 'user' ? '' : 'font-[var(--font-jp)]'}`}>{m.text}</div>
                   )}
 
                   {m.result && (
-                    <div className="mt-3 space-y-3">
+                    <div className="mt-2 sm:mt-3 space-y-2 sm:space-y-3">
                       {/* Status and context tags */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className={`inline-block text-sm px-2.5 py-1.5 rounded border ${
+                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                        <div className={`inline-block text-xs sm:text-sm px-2 sm:px-2.5 py-1 sm:py-1.5 rounded border ${
                           m.result.success
                             ? 'border-green-400 text-green-300'
                             : 'border-red-400 text-red-300'
@@ -774,24 +781,26 @@ export default function MainChat() {
                         
                         {/* Show session context if available */}
                         {m.result.session_id && (
-                          <div className="inline-block text-sm px-2.5 py-1.5 rounded border border-blue-400/50 text-blue-300">
+                          <div className="inline-block text-xs sm:text-sm px-2 sm:px-2.5 py-1 sm:py-1.5 rounded border border-blue-400/50 text-blue-300">
                             <MessageSquare className="w-3 h-3 inline mr-1" />
-                            Memory Active
+                            <span className="hidden sm:inline">Memory Active</span>
+                            <span className="sm:hidden">Memory</span>
                           </div>
                         )}
                         
                         {/* Show conversation history count if available */}
                         {conversationHistory && conversationHistory.message_count > 0 && (
-                          <div className="inline-block text-sm px-2.5 py-1.5 rounded border border-purple-400/50 text-purple-300">
+                          <div className="inline-block text-xs sm:text-sm px-2 sm:px-2.5 py-1 sm:py-1.5 rounded border border-purple-400/50 text-purple-300">
                             <Clock className="w-3 h-3 inline mr-1" />
-                            {conversationHistory.message_count} msgs
+                            <span className="hidden sm:inline">{conversationHistory.message_count} msgs</span>
+                            <span className="sm:hidden">{conversationHistory.message_count}</span>
                           </div>
                         )}
                       </div>
 
                       {/* Visualization */}
                       {m.result.success && m.result.data ? (
-                        <div className="rounded-xl border border-white/20 p-3 comic-inner">
+                        <div className="rounded-lg sm:rounded-xl border border-white/20 p-2 sm:p-3 comic-inner">
                           <DataVisualization
                             data={m.result.data}
                             title="Research Results"
@@ -800,30 +809,36 @@ export default function MainChat() {
                           />
                         </div>
                       ) : m.result.error ? (
-                        <pre className="text-xs text-red-300 whitespace-pre-wrap border border-red-400/30 rounded-xl p-3 bg-red-900/10">{m.result.error}</pre>
+                        <pre className="text-xs sm:text-sm text-red-300 whitespace-pre-wrap border border-red-400/30 rounded-lg sm:rounded-xl p-2 sm:p-3 bg-red-900/10 overflow-x-auto">{m.result.error}</pre>
                       ) : null}
 
                       {/* Metadata grid */}
                       {(m.result.reasoning_steps || m.result.citations) && (
-                        <div className="grid md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
                           {m.result.reasoning_steps && m.result.reasoning_steps.length > 0 && (
-                            <div className="rounded-xl border border-white/20 p-3">
-                              <div className="text-base md:text-lg font-semibold mb-2">Reasoning Steps</div>
+                            <div className="rounded-lg sm:rounded-xl border border-white/20 p-2 sm:p-3">
+                              <div className="text-sm sm:text-base md:text-lg font-semibold mb-2">
+                                <span className="hidden sm:inline">Reasoning Steps</span>
+                                <span className="sm:hidden">Steps</span>
+                              </div>
                               <div className="space-y-1">
                                 {m.result.reasoning_steps.map((s, i) => (
-                                  <div key={i} className="text-sm text-white/80">{i + 1}. {s}</div>
+                                  <div key={i} className="text-xs sm:text-sm text-white/80 leading-relaxed">{i + 1}. {s}</div>
                               ))}
                             </div>
                           </div>
                         )}
                           {m.result.citations && m.result.citations.length > 0 && (
-                            <div className="rounded-xl border border-white/20 p-3">
-                              <div className="text-base md:text-lg font-semibold mb-2">Data Sources</div>
+                            <div className="rounded-lg sm:rounded-xl border border-white/20 p-2 sm:p-3">
+                              <div className="text-sm sm:text-base md:text-lg font-semibold mb-2">
+                                <span className="hidden sm:inline">Data Sources</span>
+                                <span className="sm:hidden">Sources</span>
+                              </div>
                               <div className="space-y-1">
                                 {m.result.citations.map((c: any, i: number) => (
-                                  <div key={i} className="text-sm text-white/80">
-                                    <span className="font-medium">{c.source}</span>
-                                    <div className="text-white/50">{c.timestamp}</div>
+                                  <div key={i} className="text-xs sm:text-sm text-white/80">
+                                    <span className="font-medium break-words">{c.source}</span>
+                                    <div className="text-white/50 text-xs">{c.timestamp}</div>
                                 </div>
                               ))}
                             </div>
@@ -834,27 +849,30 @@ export default function MainChat() {
 
                       {/* Actions */}
                       {m.result && m.result.success && (m.result.data || m.result.result || m.result.merged_data) && (
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           <button
                             onClick={() => downloadResult(m.result!, 'json')}
-                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white flex items-center gap-2 transition-colors"
+                            className="px-2.5 sm:px-3.5 py-1.5 rounded-lg border border-white/30 text-xs sm:text-sm hover:border-white flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
                           >
-                            <FileDown className="w-4 h-4" />
-                            JSON
+                            <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            <span className="hidden xs:inline">JSON</span>
+                            <span className="xs:hidden">J</span>
                           </button>
                           <button
                             onClick={() => downloadResult(m.result!, 'excel')}
-                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white flex items-center gap-2 transition-colors"
+                            className="px-2.5 sm:px-3.5 py-1.5 rounded-lg border border-white/30 text-xs sm:text-sm hover:border-white flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
                           >
-                            <FileSpreadsheet className="w-4 h-4" />
-                            Excel
+                            <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            <span className="hidden xs:inline">Excel</span>
+                            <span className="xs:hidden">XL</span>
                           </button>
                           <button
                             onClick={() => downloadResult(m.result!, 'pdf')}
-                            className="px-3.5 py-1.5 rounded-lg border border-white/30 text-sm hover:border-white flex items-center gap-2 transition-colors"
+                            className="px-2.5 sm:px-3.5 py-1.5 rounded-lg border border-white/30 text-xs sm:text-sm hover:border-white flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
                           >
-                            <FileText className="w-4 h-4" />
-                            PDF
+                            <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            <span className="hidden xs:inline">PDF</span>
+                            <span className="xs:hidden">P</span>
                           </button>
                   </div>
                       )}
@@ -866,12 +884,12 @@ export default function MainChat() {
 
             {loading && (
               <div className="flex justify-start">
-                <div className="relative max-w-[85%] rounded-2xl border border-white/[0.15] backdrop-blur-xl bg-white/[0.05] p-4 shadow-lg"
+                <div className="relative max-w-[92%] sm:max-w-[85%] rounded-xl sm:rounded-2xl border border-white/[0.15] backdrop-blur-xl bg-white/[0.05] p-3 sm:p-4 shadow-lg"
                   style={{
                     background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
                     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
                   }}>
-                  <div className="text-sm text-white/60 mb-1">AIRAA • thinking…</div>
+                  <div className="text-xs sm:text-sm text-white/60 mb-1 sm:mb-2">AIRAA • thinking…</div>
                   <LoadingSpinner size="sm" text="Researching..." />
                 </div>
               </div>
@@ -881,44 +899,53 @@ export default function MainChat() {
           </div>
 
           {/* Advanced options toggle */}
-          <div className="flex items-center justify-between mt-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mt-3 sm:mt-4 gap-2 sm:gap-4">
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-sm px-3.5 py-1.5 rounded-full border border-white/30 hover:border-white flex items-center gap-2"
+              className="text-xs sm:text-sm px-3 sm:px-3.5 py-1.5 rounded-full border border-white/30 hover:border-white flex items-center gap-1.5 sm:gap-2 touch-manipulation"
             >
-              {showAdvanced ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              {showAdvanced ? 'Hide settings' : 'Show settings'}
+              {showAdvanced ? <EyeOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              <span className="hidden sm:inline">{showAdvanced ? 'Hide settings' : 'Show settings'}</span>
+              <span className="sm:hidden">{showAdvanced ? 'Hide' : 'Settings'}</span>
             </button>
-            <div className="text-sm text-white/60">
-              Time Range: {timeRange}
-              {address ? ` • Address: ${address.slice(0, 6)}...${address.slice(-4)}` : ''}
-              {sessionId ? ` • Session: ${sessionId.slice(-8)}` : ''}
+            <div className="text-xs sm:text-sm text-white/60 space-y-1 sm:space-y-0">
+              <div className="sm:hidden">
+                <div>Range: {timeRange}</div>
+                {address && <div>Address: {address.slice(0, 6)}...{address.slice(-4)}</div>}
+                {sessionId && <div>Session: {sessionId.slice(-8)}</div>}
+              </div>
+              <div className="hidden sm:block">
+                Time Range: {timeRange}
+                {address ? ` • Address: ${address.slice(0, 6)}...${address.slice(-4)}` : ''}
+                {sessionId ? ` • Session: ${sessionId.slice(-8)}` : ''}
+              </div>
             </div>
           </div>
 
           {showAdvanced && (
-            <div className="mt-3 space-y-4">
-              <div className="grid md:grid-cols-2 gap-3">
+            <div className="mt-3 space-y-3 sm:space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm text-white/70 mb-1">Connected Wallet Address</label>
+                  <label className="block text-xs sm:text-sm text-white/70 mb-1 sm:mb-2">Connected Wallet Address</label>
                   <input
                     type="text"
                     value={address}
                     readOnly
                     placeholder="Connected wallet address"
-                    className="w-full bg-white/5 border-2 border-white/20 rounded-xl px-3 py-2 text-white/80 cursor-not-allowed"
+                    className="w-full bg-white/5 border-2 border-white/20 rounded-lg sm:rounded-xl px-3 py-2 text-xs sm:text-sm text-white/80 cursor-not-allowed"
                   />
-                  <div className="text-sm text-white/60 mt-1 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4" />
-                    Automatically populated from connected wallet
+                  <div className="text-xs sm:text-sm text-white/60 mt-1 sm:mt-2 flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden sm:inline">Automatically populated from connected wallet</span>
+                    <span className="sm:hidden">Auto-populated from wallet</span>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm text-white/70 mb-1">Time Range</label>
+                  <label className="block text-xs sm:text-sm text-white/70 mb-1 sm:mb-2">Time Range</label>
                   <select
                     value={timeRange}
                     onChange={(e) => setTimeRange(e.target.value)}
-                    className="w-full bg-transparent border-2 border-white/20 rounded-xl px-3 py-2 focus:outline-none focus:border-white"
+                    className="w-full bg-transparent border-2 border-white/20 rounded-lg sm:rounded-xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-white touch-manipulation"
                   >
                     <option className="bg-black" value="1d">Last 24 Hours</option>
                     <option className="bg-black" value="7d">Last 7 Days</option>
@@ -930,38 +957,40 @@ export default function MainChat() {
               </div>
               
               {/* Session Management */}
-              <div className="border-t border-white/10 pt-4">
-                <label className="block text-sm text-white/70 mb-2">Conversation Memory</label>
-                <div className="grid md:grid-cols-2 gap-3">
+              <div className="border-t border-white/10 pt-3 sm:pt-4">
+                <label className="block text-xs sm:text-sm text-white/70 mb-2">Conversation Memory</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <div className="text-sm text-white/60 mb-1">Current Session</div>
+                    <div className="text-xs sm:text-sm text-white/60 mb-1 sm:mb-2">Current Session</div>
                     <div className="font-mono text-xs text-white/80 bg-white/5 rounded-lg p-2 break-all">
                       {sessionId || 'No session active'}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col sm:flex-row md:flex-col gap-2">
                     <button
                       onClick={startNewSession}
-                      className="px-3 py-2 text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2"
+                      className="px-3 py-2 text-xs sm:text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2 touch-manipulation justify-center sm:justify-start"
                     >
-                      <MessageSquare className="w-4 h-4" />
-                      New Conversation
+                      <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">New Conversation</span>
+                      <span className="sm:hidden">New Chat</span>
                     </button>
                     <button
                       onClick={() => refreshConversationHistory()}
-                      className="px-3 py-2 text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2"
+                      className="px-3 py-2 text-xs sm:text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2 touch-manipulation justify-center sm:justify-start"
                       disabled={!sessionId}
                     >
-                      <Clock className="w-4 h-4" />
-                      Refresh History
+                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Refresh History</span>
+                      <span className="sm:hidden">Refresh</span>
                     </button>
                   </div>
                 </div>
                 
                 {conversationHistory && (
-                  <div className="mt-3 text-sm">
-                    <div className="text-white/60 mb-1">Session Statistics</div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                  <div className="mt-3 text-xs sm:text-sm">
+                    <div className="text-white/60 mb-1 sm:mb-2 text-xs sm:text-sm">Session Statistics</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 text-xs">
                       <div>
                         <div className="text-white/50">Messages</div>
                         <div className="text-white/80 flex items-center gap-1">
@@ -971,17 +1000,18 @@ export default function MainChat() {
                       </div>
                       <div>
                         <div className="text-white/50">Created</div>
-                        <div className="text-white/80">{new Date(conversationHistory.created_at).toLocaleDateString()}</div>
+                        <div className="text-white/80 text-xs">{new Date(conversationHistory.created_at).toLocaleDateString()}</div>
                       </div>
-                      <div>
+                      <div className="col-span-2 md:col-span-1">
                         <div className="text-white/50">Last Active</div>
-                        <div className="text-white/80">{new Date(conversationHistory.last_activity).toLocaleDateString()}</div>
+                        <div className="text-white/80 text-xs">{new Date(conversationHistory.last_activity).toLocaleDateString()}</div>
                       </div>
                     </div>
                     {conversationHistory.message_count > 0 && (
                       <div className="mt-2 text-xs text-green-400 flex items-center gap-1">
                         <MessageSquare className="w-3 h-3" />
-                        Previous conversation loaded - context is preserved
+                        <span className="hidden sm:inline">Previous conversation loaded - context is preserved</span>
+                        <span className="sm:hidden">Context preserved</span>
                       </div>
                     )}
                   </div>
@@ -991,13 +1021,13 @@ export default function MainChat() {
           )}
 
           {/* Input */}
-          <div className="mt-6 flex items-end gap-3">
+          <div className="mt-4 sm:mt-6 flex items-end gap-2 sm:gap-3">
             <div className="flex-1 relative">
               <textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Ask anything about Web3, DeFi, on-chain data..."
-                className={`w-full ${hasUserMessage ? 'h-28 md:h-32' : 'h-24 md:h-28'} bg-white/[0.05] backdrop-blur-sm border border-white/[0.15] rounded-2xl px-4 py-3 placeholder-white/40 focus:outline-none focus:border-white/[0.3] focus:bg-white/[0.08] resize-none text-white text-base md:text-lg transition-[height] duration-500 ease-out`}
+                className={`w-full ${hasUserMessage ? 'h-20 sm:h-24 md:h-28 lg:h-32' : 'h-16 sm:h-20 md:h-24 lg:h-28'} bg-white/[0.05] backdrop-blur-sm border border-white/[0.15] rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 placeholder-white/40 focus:outline-none focus:border-white/[0.3] focus:bg-white/[0.08] resize-none text-white text-sm sm:text-base md:text-lg transition-[height] duration-500 ease-out`}
                 style={{
                   background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
                   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
@@ -1009,21 +1039,32 @@ export default function MainChat() {
                   }
                 }}
               />
+              {/* Mobile keyboard hint */}
+              <div className="absolute bottom-1 right-2 text-xs text-white/30 pointer-events-none sm:hidden">
+                Enter to send
+              </div>
             </div>
             <button
               onClick={handleSend}
               disabled={loading || !query.trim()}
-              className={`h-12 px-6 rounded-xl backdrop-blur-sm border transition-all duration-200 font-medium text-base ${
+              className={`h-10 sm:h-12 px-4 sm:px-6 rounded-lg sm:rounded-xl backdrop-blur-sm border transition-all duration-200 font-medium text-sm sm:text-base touch-manipulation ${
                 loading || !query.trim()
                   ? 'border-white/[0.1] bg-white/[0.03] text-white/30 cursor-not-allowed'
-                  : 'border-white/[0.2] bg-white/[0.08] text-white hover:bg-white/[0.15] hover:border-white/[0.3] shadow-lg'
+                  : 'border-white/[0.2] bg-white/[0.08] text-white hover:bg-white/[0.15] hover:border-white/[0.3] shadow-lg active:scale-95'
               }`}
               style={!(loading || !query.trim()) ? {
                 background: 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.06) 100%)',
                 boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
               } : {}}
             >
-              {loading ? '...' : 'Send'}
+              {loading ? (
+                <span className="flex items-center gap-1">
+                  <span className="hidden sm:inline">...</span>
+                  <span className="sm:hidden">•••</span>
+                </span>
+              ) : (
+                'Send'
+              )}
             </button>
           </div>
         </div>
