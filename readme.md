@@ -147,7 +147,6 @@ Traditional blockchain research requires navigating multiple platforms, understa
 ```
 
 ### Backend Architecture (`ai-agent/`)
-### Backend Architecture (`ai-agent/`)
 
 The backend is a Flask-based research agent leveraging LangChain for AI orchestration:
 
@@ -178,7 +177,6 @@ The backend is a Flask-based research agent leveraging LangChain for AI orchestr
 </tr>
 </table>
 
-### Frontend Architecture (`client/`)
 ### Frontend Architecture (`client/`)
 
 Modern Next.js application with anime-inspired UI:
@@ -485,7 +483,6 @@ List all active conversation sessions.
 ### Data Sources
 
 #### 🔷 Dune Analytics
-#### 🔷 Dune Analytics
 
 <table>
 <tr>
@@ -777,7 +774,6 @@ Text:       White with varying opacity for hierarchy
   - `Esc` - Close modals
 
 #### 📊 Visualization Modes
-#### 📊 Visualization Modes
 
 | Mode | Icon | Description | Best For |
 |------|------|-------------|----------|
@@ -944,9 +940,6 @@ services:
 | `FLASK_DEBUG` | `0` | Enable Flask debug mode (0 for production) |
 | `PORT` | `8000` | Backend server port |
 
-### 💻 Local Development
-
-Run both frontend and backend simultaneously:
 ### 💻 Local Development
 
 Run both frontend and backend simultaneously:
