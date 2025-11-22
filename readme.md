@@ -14,7 +14,7 @@
 
 **Your intelligent blockchain research companion powered by Google's Gemini AI**
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Architecture](#-architecture) • [Contributing](#-contributing)
+[Features](#features) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Architecture](#architecture) • [Contributing](#contributing)
 
 </div>
 
@@ -22,32 +22,32 @@
 
 ## 📑 Table of Contents
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Quick Start](#-quick-start)
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
   - [Prerequisites](#prerequisites)
   - [Backend Setup](#backend-setup)
   - [Frontend Setup](#frontend-setup)
-- [Documentation](#-documentation)
+- [Documentation](#documentation)
   - [API Endpoints](#api-endpoints)
   - [Data Sources](#data-sources)
-- [Core Components](#-core-components)
-- [UI Features](#-ui-features)
-- [Design System](#-design-system)
-- [Deployment](#-deployment)
-- [Usage Examples](#-usage-examples)
-- [Development](#-development)
-- [Security](#-security)
-- [Performance](#-performance)
-- [Troubleshooting](#-troubleshooting)
-- [FAQ](#-faq)
-- [Roadmap](#-roadmap)
-- [Configuration](#-configuration)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Acknowledgments](#-acknowledgments)
+- [Core Components](#core-components)
+- [UI Features](#ui-features)
+- [Design System](#design-system)
+- [Deployment](#deployment)
+- [Usage Examples](#usage-examples)
+- [Development](#development)
+- [Security](#security)
+- [Performance](#performance)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Roadmap](#roadmap)
+- [Configuration](#configuration)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ---
 
