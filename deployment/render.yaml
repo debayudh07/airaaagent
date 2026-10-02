@@ -8,6 +8,8 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
       - key: ALLOWED_ORIGINS
         sync: false
       - key: DUNE_API_KEY
@@ -17,5 +19,7 @@ services:
       - key: COINMARKETCAP_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: ADMIN_TOKEN
         sync: false
 

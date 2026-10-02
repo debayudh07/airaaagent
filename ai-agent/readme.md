@@ -1,542 +1,139 @@
-# AIRAA Backend Setup Guide
+# AIRAA agent (backend)
 
-AI-powered Web3 research agent with multi-source blockchain data integration.
+Flask API around a tool-using research agent for Web3 questions. It plans which data sources to query,
+fetches them in parallel, checks for gaps, and writes an answer grounded in the data it actually retrieved.
 
-## 🎯 Overview
+## How a question is answered
 
-The AIRAA backend is a Flask-based research agent that leverages LangChain for AI orchestration and provides:
-- **AI Research Engine**: Google Gemini 2.0 Flash integration for intelligent blockchain analysis
-- **Multi-Source Data**: Dune Analytics, Etherscan, CoinMarketCap, and DefiLlama APIs
-- **Session Management**: Persistent conversation memory with chat history
-- **Tool Orchestration**: Custom LangChain tools for blockchain data retrieval
-- **RESTful API**: CORS-enabled endpoints for frontend integration
-
-## 📋 Prerequisites
-
-Before setting up the backend, ensure you have:
-
-- **Python**: Version 3.8 or higher
-- **pip**: Latest version (comes with Python)
-- **API Keys**: For Gemini AI, Dune Analytics, Etherscan, CoinMarketCap
-- **Internet Connection**: For API calls and model inference
-
-### Required API Keys
-
-1. **Google Gemini AI** (`GEMINI_API_KEY`)
-   - Get from: [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - Used for: AI research analysis and conversation
-
-2. **Dune Analytics** (`DUNE_API_KEY`)
-   - Get from: [Dune Analytics](https://dune.com/settings/api)
-   - Used for: Custom blockchain queries and analytics
-
-3. **Etherscan** (`ETHERSCAN_API_KEY`)
-   - Get from: [Etherscan API](https://etherscan.io/apis)
-   - Used for: Ethereum blockchain data
-
-4. **CoinMarketCap** (`COINMARKETCAP_API_KEY`)
-   - Get from: [CoinMarketCap API](https://pro.coinmarketcap.com/api/)
-   - Used for: Cryptocurrency market data
-
-## 🚀 Installation & Setup
-
-### 1. Clone and Navigate
-```bash
-git clone <repository-url>
-cd airaa/ai-agent
+```
+question ──► greeting? ──yes──► canned reply (no LLM, no data calls)
+                │ no
+                ▼
+        PLAN   gemini-3.5-flash-lite, structured output: which tools + which coins/protocols/chain
+                │   (falls back to keyword rules if the model is down or slow)
+                ▼
+        GATHER tools run in parallel, 40s timeout each, one retry on timeouts / 429 / 5xx
+                │
+                ▼
+        REFLECT only if a tool failed: "would one more round help?" (max 1 extra round)
+                │
+                ▼
+     SYNTHESISE gemini-3.8-flash streams the answer from a "verified data" block;
+                if the model is unavailable, the retrieved data is returned instead
 ```
 
-### 2. Create Virtual Environment (Recommended)
-```bash
-# Create virtual environment
-python -m venv airaa-env
+Every result carries `tool_trace` (per-tool timing, attempts, errors), the plan, and `data_quality_score`, which is the
+percentage of attempted sources that responded. Failed sources are named in the answer footer.
 
-# Activate virtual environment
-# On Windows:
-airaa-env\Scripts\activate
-# On macOS/Linux:
-source airaa-env/bin/activate
-```
+## Layout
 
-### 3. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Environment Configuration
-Create a `.env` file in the `ai-agent/` directory:
-
-```env
-# AI Configuration
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Blockchain Data APIs
-DUNE_API_KEY=your_dune_api_key_here
-ETHERSCAN_API_KEY=your_etherscan_api_key_here
-COINMARKETCAP_API_KEY=your_coinmarketcap_api_key_here
-
-# Server Configuration
-ALLOWED_ORIGINS=*
-FLASK_DEBUG=0
-PORT=8000
-```
-
-### 5. Verify Installation
-Test the installation:
-```bash
-python -c "import httpx, flask, langchain; print('Dependencies installed successfully')"
-```
-
-### 6. Start the Server
-```bash
-python app.py
-```
-
-The API will be available at: `http://localhost:8000`
-
-### 7. Test the API
-```bash
-# Health check
-curl http://localhost:8000/api/health
-
-# Expected response: {"status": "ok"}
-```
-
-## 🏗️ Architecture Overview
-
-### Core Components
-
-#### 1. Flask Application (`app.py`)
-- **CORS Configuration**: Handles cross-origin requests from frontend
-- **Route Handlers**: API endpoints for research and session management
-- **Error Handling**: Comprehensive exception management
-- **Async Support**: Asyncio integration for concurrent operations
-
-#### 2. Research Agent (`main.py`)
-- **OptimizedWeb3ResearchAgent**: Main agent class
-- **Session Management**: Conversation persistence and memory
-- **Tool Integration**: Custom LangChain tools for data sources
-- **AI Orchestration**: Gemini AI integration via LangChain
-
-#### 3. Data Tools
-- **Dune Analytics Tool**: SQL query execution and dashboard data
-- **Etherscan Tool**: Ethereum blockchain data retrieval
-- **CoinMarketCap Tool**: Cryptocurrency market information
-- **DefiLlama Tool**: DeFi protocol analytics
-
-### Request Flow
-```
-Frontend Request → Flask App → Research Agent → AI + Tools → Response
-```
-
-## 🛠️ API Endpoints
-
-### Health Check
-```http
-GET /api/health
-```
-**Response:**
-```json
-{
-  "status": "ok"
-}
-```
-
-### Research Query
-```http
-POST /api/research
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "query": "What is the current TVL of Uniswap V3?",
-  "address": "0x1234...", // optional
-  "time_range": "7d", // optional: 1d, 7d, 30d, 90d
-  "session_id": "uuid" // optional for conversation continuity
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": "AI-formatted research report",
-  "data": {
-    "merged_data": "Structured data from APIs",
-    "reasoning_steps": ["Step 1", "Step 2"],
-    "data_sources_used": ["dune", "etherscan"],
-    "execution_time": 2.5
-  },
-  "session_id": "uuid",
-  "timestamp": "2024-01-01T12:00:00Z"
-}
-```
-
-### Session Management
-
-#### Get Conversation History
-```http
-GET /api/conversation/{session_id}
-```
-
-#### List Active Sessions
-```http
-GET /api/sessions
-```
-
-## 🔧 Configuration & Customization
-
-### Environment Variables
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `GEMINI_API_KEY` | Google AI API key | - | Yes |
-| `DUNE_API_KEY` | Dune Analytics API key | - | Yes |
-| `ETHERSCAN_API_KEY` | Etherscan API key | - | Yes |
-| `COINMARKETCAP_API_KEY` | CoinMarketCap API key | - | Yes |
-| `ALLOWED_ORIGINS` | CORS allowed origins | `*` | No |
-| `FLASK_DEBUG` | Flask debug mode | `0` | No |
-| `PORT` | Server port | `8000` | No |
-
-### Tool Configuration
-
-#### Adding New Data Sources
-To add a new blockchain data source:
-
-1. **Create a new tool** in `main.py`:
-```python
-@tool
-async def new_api_tool(query: str) -> Dict[str, Any]:
-    """
-    Description of the new API tool.
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"https://api.example.com/data?query={query}")
-        return {"source": "new_api", "data": response.json()}
-```
-
-2. **Add to tool list** in the agent:
-```python
-tools = [
-    dune_analytics_tool,
-    etherscan_tool,
-    coinmarketcap_tool,
-    defillama_tool,
-    new_api_tool  # Add your new tool
-]
-```
-
-#### Customizing AI Behavior
-Modify the system prompts in `main.py`:
-```python
-SYSTEM_PROMPT = """
-You are AIRAA, an advanced Web3 research agent...
-[Customize the AI behavior here]
-"""
-```
-
-### Session Configuration
-Modify session settings in `ConversationSessionManager`:
-```python
-# Session timeout (default: 24 hours)
-session_timeout_hours = 24
-
-# Maximum sessions (default: 100)
-max_sessions = 100
-```
-
-## 🧪 Testing
-
-### Unit Tests
-Run the test suite:
-```bash
-cd tests
-python test_conversation_memory.py
-python final_test.py
-```
-
-### Manual Testing
-
-#### Test Research Endpoint
-```bash
-curl -X POST http://localhost:8000/api/research \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What is the current price of ETH?",
-    "time_range": "7d"
-  }'
-```
-
-#### Test Session Management
-```bash
-# Create a session
-curl -X POST http://localhost:8000/api/research \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Hello", "session_id": "test-session"}'
-
-# Get session history
-curl http://localhost:8000/api/conversation/test-session
-```
-
-### Load Testing
-For production readiness:
-```bash
-# Install ab (Apache Bench)
-# Test concurrent requests
-ab -n 100 -c 10 http://localhost:8000/api/health
-```
-
-## 🔍 Data Sources Integration
-
-### Dune Analytics
-- **Purpose**: Custom blockchain queries and analytics dashboards
-- **Rate Limits**: Based on your Dune plan (Pro: 1000 requests/month)
-- **Features**: SQL query execution, pre-built dashboards
-- **Documentation**: [Dune API Docs](https://docs.dune.com/api-reference/)
-
-### Etherscan
-- **Purpose**: Ethereum blockchain data and smart contract interactions
-- **Rate Limits**: 5 calls/second (free), 20 calls/second (pro)
-- **Features**: Transaction history, token transfers, contract data
-- **Documentation**: [Etherscan API Docs](https://docs.etherscan.io/)
-
-### CoinMarketCap
-- **Purpose**: Cryptocurrency market data and rankings
-- **Rate Limits**: 333 calls/month (basic), 10,000/month (standard)
-- **Features**: Price data, market cap, trading volume, metadata
-- **Documentation**: [CMC API Docs](https://coinmarketcap.com/api/documentation/)
-
-### DefiLlama
-- **Purpose**: DeFi protocol analytics and TVL data
-- **Rate Limits**: No authentication required, generous limits
-- **Features**: Protocol TVL, yield farming data, DeFi metrics
-- **Documentation**: [DefiLlama API Docs](https://defillama.com/docs/api)
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-#### 1. Import Errors
-```bash
-# Verify Python version
-python --version
-
-# Reinstall dependencies
-pip install -r requirements.txt --upgrade
-```
-
-#### 2. API Key Issues
-```bash
-# Check environment variables
-python -c "import os; print(os.getenv('GEMINI_API_KEY'))"
-
-# Verify .env file is in ai-agent/ directory
-ls -la .env
-```
-
-#### 3. Port Already in Use
-```bash
-# Find process using port 8000
-lsof -i :8000  # macOS/Linux
-netstat -ano | findstr :8000  # Windows
-
-# Use different port
-PORT=8001 python app.py
-```
-
-#### 4. CORS Issues
-If frontend can't connect:
-1. Check `ALLOWED_ORIGINS` environment variable
-2. Verify frontend URL is included
-3. Check browser console for CORS errors
-
-#### 5. Memory Issues
-For large datasets:
-```python
-# Adjust session limits in main.py
-session_manager = ConversationSessionManager(
-    max_sessions=50,  # Reduce from 100
-    session_timeout_hours=12  # Reduce from 24
-)
-```
-
-### Debug Mode
-Enable detailed logging:
-```env
-FLASK_DEBUG=1
-```
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-### Performance Monitoring
-Monitor API performance:
-```bash
-# Log response times
-tail -f app.log
-
-# Monitor memory usage
-pip install psutil
-python -c "import psutil; print(f'Memory: {psutil.virtual_memory().percent}%')"
-```
-
-## 🚀 Production Deployment
-
-### Gunicorn Configuration
-The app includes production-ready Gunicorn configuration:
-
-```bash
-gunicorn app:app \
-  --bind 0.0.0.0:8000 \
-  --workers 2 \
-  --threads 2 \
-  --timeout 180 \
-  --access-logfile - \
-  --error-logfile -
-```
-
-### Environment Security
-For production:
-
-1. **Secure API Keys**:
-   - Use environment variables, not `.env` files
-   - Rotate keys regularly
-   - Monitor API usage
-
-2. **CORS Configuration**:
-   ```env
-   ALLOWED_ORIGINS=https://your-frontend-domain.com,https://your-staging-domain.com
-   ```
-
-3. **Rate Limiting**:
-   Consider implementing rate limiting for production use.
-
-### Deployment Platforms
-
-#### Render (Recommended)
-The project includes `render.yaml` configuration:
-- Automatic deployment from git
-- Environment variable management
-- Built-in monitoring
-
-#### Docker Deployment
-Create `Dockerfile`:
-```dockerfile
-FROM python:3.9-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8000
-
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8000"]
-```
-
-#### Traditional VPS
-1. Set up Python 3.8+ environment
-2. Install dependencies with `pip`
-3. Configure reverse proxy (nginx)
-4. Set up process manager (systemd, supervisor)
-
-## 📊 Monitoring & Maintenance
-
-### Health Monitoring
-Implement health checks:
-```bash
-# Check API health
-curl http://localhost:8000/api/health
-
-# Monitor logs
-tail -f /var/log/airaa/app.log
-```
-
-### Performance Metrics
-Track key metrics:
-- API response times
-- Error rates
-- Memory usage
-- Session count
-- API quota usage
-
-### Maintenance Tasks
-
-#### Daily
-- Monitor API quota usage
-- Check error logs
-- Verify all services are running
-
-#### Weekly
-- Review session cleanup
-- Update dependencies if needed
-- Check API key rotation schedule
-
-#### Monthly
-- Analyze usage patterns
-- Update AI model versions
-- Security audit
-
-## 🔒 Security Considerations
-
-### API Security
-- **Environment Variables**: Never commit API keys to version control
-- **HTTPS**: Use HTTPS in production
-- **Rate Limiting**: Implement request rate limiting
-- **Input Validation**: Sanitize all user inputs
-
-### Data Privacy
-- **Session Data**: Automatically expires after 24 hours
-- **Logging**: Avoid logging sensitive information
-- **API Responses**: Filter sensitive data before returning
-
-### Dependencies
-Keep dependencies updated:
-```bash
-pip list --outdated
-pip install -r requirements.txt --upgrade
-```
-
-## 📞 Support & Development
-
-### Development Mode
-For active development:
-```bash
-export FLASK_DEBUG=1
-python app.py
-```
-
-### Code Structure
 ```
 ai-agent/
-├── app.py              # Flask application and routes
-├── main.py             # Research agent and tools
-├── requirements.txt    # Python dependencies
-├── .env               # Environment variables (not in git)
-├── tests/             # Test suite
-│   ├── test_conversation_memory.py
-│   └── final_test.py
-└── api-docs/          # API documentation
-    └── defillama-api.json
+├── app.py                 WSGI entry point (gunicorn app:app)
+├── main.py                CLI: python main.py "price of ETH"
+├── airaa/
+│   ├── config.py          all environment-driven settings (models, timeouts, limits)
+│   ├── schemas.py         ResearchRequest + the LLM's structured outputs (Plan, FollowUp)
+│   ├── http.py            per-run httpx client (safe across Flask's per-request event loops)
+│   ├── memory.py          in-memory conversation sessions (TTL + size limits)
+│   ├── greeting.py        small-talk detection
+│   ├── tools/             coinmarketcap, defillama, dune, etherscan (+ TOOL_CATALOG for the planner)
+│   ├── agent/
+│   │   ├── core.py        Web3ResearchAgent: the plan -> gather -> reflect -> synthesise loop
+│   │   ├── planner.py     LLM planner + rule-based fallback + reflection
+│   │   ├── executor.py    parallel tool runner (timeouts, retries, trace)
+│   │   ├── merge.py       tool results -> merged_data
+│   │   ├── context.py     merged_data -> the text the model sees
+│   │   ├── prompts.py     system prompts
+│   │   └── llm.py         Gemini factories
+│   └── api/               Flask app factory, routes, validation, rate limiting
+└── tests/                 pytest suite (offline); tests/manual holds old live-API scripts
 ```
 
-### Contributing
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+## Run it
 
-### Getting Help
-- **Logs**: Check application logs for detailed error information
-- **Documentation**: Review inline code comments
-- **API Testing**: Use tools like Postman or curl for debugging
-- **Community**: Check the main README for support channels
+```bash
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                                  # add your keys
+python app.py                                         # http://localhost:8000
+python main.py "compare BTC and SOL"                  # or use the CLI
+```
 
----
+Only `GEMINI_API_KEY` is required. Each other key enables one source; the agent reports a missing key as an
+unavailable source instead of failing. DefiLlama needs no key.
 
-Built with ❤️ for the Web3 community using enterprise-grade Python technologies.
+## Models
+
+| Role | Default | Env override |
+|---|---|---|
+| Answer synthesis | `gemini-3.8-flash` | `AIRAA_SYNTHESIS_MODEL` |
+| Planning and reflection | `gemini-3.5-flash-lite` | `AIRAA_PLANNER_MODEL` |
+
+Google shut down `gemini-2.0-flash` on 2026-06-01. Check [the Gemini model list](https://ai.google.dev/gemini-api/docs/models)
+before pinning a model; both defaults are overridable without a code change.
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | status, model names, which sources have credentials |
+| GET | `/api/tools` | tool catalog |
+| POST | `/api/research` | run a question, return JSON |
+| POST | `/api/research/stream` | same, as Server-Sent Events |
+| GET | `/api/conversation/<id>` | history for a session |
+| DELETE | `/api/conversation/<id>` | forget a session |
+| GET | `/api/sessions` | operator listing; returns 404 unless `ADMIN_TOKEN` is set, then needs `X-Admin-Token` |
+
+Request body for both research endpoints:
+
+```json
+{ "query": "TVL of Aave", "address": "0x...", "time_range": "7d", "session_id": "web-1700000000-abc123" }
+```
+
+`query` is required (max 1000 chars); `address` must be a 0x address; `time_range` is one of `1d 7d 30d 90d 1y`;
+`session_id` is 8-100 chars of letters, digits, `-`, `_`. Invalid input gets a 400, and more than
+`AIRAA_RATE_LIMIT_PER_MINUTE` research requests per client per minute gets a 429 with `Retry-After`.
+
+Stream events (`data: {json}` lines): `status`, `plan`, `tool_start`, `tool_retry`, `tool_end`, `followup`, `token`, then `result`
+(or `error`). Closing the connection stops the run.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GEMINI_API_KEY` | (required) | Google AI Studio key |
+| `COINMARKETCAP_API_KEY`, `ETHERSCAN_API_KEY`, `DUNE_API_KEY` | | enable those sources |
+| `ALLOWED_ORIGINS` | `*` | comma-separated CORS origins |
+| `ADMIN_TOKEN` | (unset) | enables `/api/sessions` |
+| `TOOL_TIMEOUT_SECONDS` | 40 | per-tool budget |
+| `PLANNER_TIMEOUT_SECONDS` | 15 | planner/reflection budget before falling back |
+| `AIRAA_TOOL_RETRIES` | 1 | retries on transient tool errors |
+| `AIRAA_MAX_FOLLOWUP_ROUNDS` | 1 | extra gather rounds after reflection |
+| `AIRAA_RATE_LIMIT_PER_MINUTE` | 20 | per client; `0` disables |
+| `AIRAA_MAX_SESSIONS`, `AIRAA_SESSION_TTL_HOURS` | 200, 24 | session store limits |
+
+## Add a tool
+
+1. Create `airaa/tools/<name>.py` with an `@tool async def <name>_tool(query: str, ...)` that returns
+   `{"success": bool, "data": ..., "source": "<name>", "metadata": {...}}` and never raises.
+2. Register it in `airaa/tools/__init__.py` (`TOOLS` and `TOOL_CATALOG`) and add `"<name>_tool"` to the `ToolName` literal in `airaa/schemas.py`.
+3. Map its arguments in `build_tool_args` (`agent/executor.py`), add a merge branch in `agent/merge.py` and a renderer in `agent/context.py`.
+4. Add a mocked-HTTP test in `tests/test_tools.py`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite is offline: LLMs and tools are faked, HTTP goes through `httpx.MockTransport`. `tests/manual/` holds older
+scripts that call live APIs and need updating before use.
+
+## Limits worth knowing
+
+- Sessions live in process memory: lost on restart and not shared across gunicorn workers.
+- The rate limiter is per process, so with N workers the effective limit is N times higher.
+- The Dune tool supports DEX pair/volume questions only.
+- Session ids are chosen by the client, so treat them as unguessable only if the client makes them so.

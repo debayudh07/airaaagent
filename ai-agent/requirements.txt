@@ -1,23 +1,13 @@
-# Core dependencies for CLI Web3 Research Agent
-httpx==0.25.2
-flask==3.0.3
-flask-cors==4.0.1
-gunicorn==21.2.0
+# Web layer
+flask>=3.0,<4
+flask-cors>=4.0.1,<7
+gunicorn>=22.0
 
-# LangChain dependencies - using more stable versions
-langchain==0.2.16
-langchain-core==0.2.38
-langchain-google-genai==1.0.10
-langchain-community==0.2.16
+# HTTP + config
+httpx>=0.27,<1
+python-dotenv>=1.0
+pydantic>=2.7,<3
 
-# Comment out unused web framework dependencies
-# fastapi==0.104.1
-# uvicorn[standard]==0.24.0
-
-# Comment out database dependencies  
-# asyncpg==0.29.0
-
-# Comment out multipart since it's for web forms
-# python-multipart==0.0.6
-
-python-dotenv==1.0.1
+# LLM (Gemini 3.x via the consolidated Google GenAI SDK)
+langchain-core>=1.6.1,<2
+langchain-google-genai>=4.4,<5

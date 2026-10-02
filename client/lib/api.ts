@@ -15,6 +15,8 @@ export type AgentEvent =
   | { type: 'status'; stage: string; message: string }
   | { type: 'plan'; tools: string[]; rationale?: string; planner?: string }
   | { type: 'tool_start'; tool: string }
+  | { type: 'tool_retry'; tool: string; error?: string | null }
+  | { type: 'followup'; tools: string[]; reason?: string }
   | { type: 'tool_end'; tool: string; success: boolean; duration_ms: number; error?: string | null }
   | { type: 'token'; text: string }
   | { type: 'result'; result: unknown }

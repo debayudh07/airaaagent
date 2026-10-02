@@ -78,7 +78,7 @@ Traditional blockchain research requires navigating multiple platforms, understa
 <td width="50%">
 
 #### Intelligence & Analysis
-- 🤖 **AI-Powered Research**: Gemini 2.0 Flash integration
+- 🤖 **AI-Powered Research**: Gemini 3.x (Flash for answers, Flash-Lite for planning)
 - 🧠 **Context-Aware**: Session memory for coherent conversations
 - 📊 **Multi-Source Data**: Dune, Etherscan, CoinMarketCap, DefiLlama
 - 🔍 **Deep Analysis**: Comprehensive blockchain insights
@@ -161,7 +161,7 @@ The backend is a Flask-based research agent leveraging LangChain for AI orchestr
 </tr>
 <tr>
 <td>🤖 <strong>AI Engine</strong></td>
-<td>Google Gemini 2.0 Flash via LangChain</td>
+<td>Google Gemini 3.8 Flash / 3.5 Flash-Lite via LangChain</td>
 </tr>
 <tr>
 <td>🧠 <strong>Memory</strong></td>
@@ -461,24 +461,18 @@ Retrieve complete chat history for a specific session.
 }
 ```
 
+**DELETE** `/api/conversation/{session_id}`
+
+Forget a session. Returns `{"success": true, "deleted": true}`.
+
 **GET** `/api/sessions`
 
-List all active conversation sessions.
+Operator-only listing of all sessions. Returns 404 unless the server has `ADMIN_TOKEN` set; then send it as the
+`X-Admin-Token` header.
 
-**Response:**
-```json
-{
-  "sessions": [
-    {
-      "session_id": "user-session-123",
-      "message_count": 10,
-      "created_at": "2024-11-22T18:45:00.000Z",
-      "last_activity": "2024-11-22T18:49:18.794Z"
-    }
-  ],
-  "total": 1
-}
-```
+**POST** `/api/research/stream`
+
+Same body as `/api/research`, returned as Server-Sent Events: `status`, `plan`, `tool_start`, `tool_end`, `token`, then `result`.
 
 ### Data Sources
 
@@ -623,10 +617,10 @@ class OptimizedWeb3ResearchAgent:
 
 | Tool | File | Purpose |
 |------|------|---------|
-| `dune_analytics_tool` | `main.py` | Execute custom blockchain SQL queries on Dune |
-| `etherscan_tool` | `main.py` | Retrieve Ethereum blockchain data and transactions |
-| `coinmarketcap_tool` | `main.py` | Fetch cryptocurrency market data and prices |
-| `defillama_tool` | `main.py` | Access DeFi protocol TVL and ecosystem info |
+| `dune_analytics_tool` | `airaa/tools/dune.py` | DEX pair volume and liquidity from Dune |
+| `etherscan_tool` | `airaa/tools/etherscan.py` | Wallet balance, transactions and token transfers (Etherscan V2, multichain) |
+| `coinmarketcap_tool` | `airaa/tools/coinmarketcap.py` | Prices, market cap, volume and rank for any listed coin |
+| `defillama_tool` | `airaa/tools/defillama.py` | Protocol and chain TVL, stablecoins, yields, DEX volume, fees, bridges |
 
 Each tool provides:
 - Input validation and sanitization
@@ -1103,19 +1097,16 @@ python app.py
 **Project Structure:**
 ```
 ai-agent/
-├── app.py              # Flask application & API routes
-├── main.py             # Core research agent & tools
-├── requirements.txt    # Python dependencies
-├── .env               # Environment variables (create this)
-├── tests/             # Test files
-│   ├── test_conversation_memory.py
-│   └── final_test.py
-└── api-docs/          # API documentation
+├── app.py              # WSGI entry point (gunicorn app:app)
+├── main.py             # CLI
+├── airaa/              # the package: config, tools/, agent/, api/, memory, schemas
+├── tests/              # offline pytest suite
+├── requirements.txt    # runtime dependencies
+├── .env.example        # copy to .env and add keys
+└── api-docs/           # API documentation
 ```
 
-**Key Files:**
-- `app.py`: Flask routes, CORS, error handling
-- `main.py`: AI agent logic, LangChain tools, session management
+See [ai-agent/readme.md](ai-agent/readme.md) for the architecture, configuration and how to add a tool.
 
 ---
 
@@ -1440,7 +1431,7 @@ A: AIRAA uses Google's Gemini AI and real-time data from reputable sources. Howe
 A: Yes, but ensure outbound connections to API providers (Google, Dune, Etherscan, etc.) are allowed.
 
 **Q: How do I add custom data sources?**  
-A: Extend the `main.py` file by creating new tool functions following the LangChain tool pattern.
+A: Add a module under `ai-agent/airaa/tools/` and register it; see "Add a tool" in `ai-agent/readme.md`.
 
 **Q: Is there a API rate limit?**  
 A: AIRAA itself doesn't impose limits, but external APIs do. Implement caching and monitor usage.
@@ -1486,8 +1477,8 @@ A: Sessions are stored in memory by default. For persistence, implement a databa
 | File | Purpose |
 |------|---------|
 | `requirements.txt` | Python dependencies and versions |
-| `app.py` | Flask application, API routes, error handling |
-| `main.py` | Core research agent logic, LangChain tools |
+| `app.py` | WSGI entry point |
+| `airaa/` | Agent, tools, API and session logic (see `ai-agent/readme.md`) |
 | `.env` | Environment variables and API keys |
 | `render.yaml` | Render deployment configuration |
 
