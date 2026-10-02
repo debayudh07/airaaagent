@@ -20,6 +20,7 @@ from ..greeting import detect_greeting, get_greeting_response
 from ..http import client_scope
 from ..memory import SessionManager, get_session_manager
 from ..schemas import EventCallback, Plan, ResearchRequest
+from .charts import build_charts
 from .context import build_context, plain_summary
 from .executor import emit, run_tools
 from .llm import synthesis_llm, text_of
@@ -30,10 +31,11 @@ from .prompts import SYNTHESIS_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 SOURCE_LABELS = {
-    "coinmarketcap": "CoinMarketCap", "defillama": "DefiLlama",
-    "dune_analytics": "Dune", "etherscan": "Etherscan",
+    "coinmarketcap": "CoinMarketCap", "coingecko": "CoinGecko", "defillama": "DefiLlama",
+    "dune_analytics": "Dune", "etherscan": "Etherscan", "dexscreener": "DEX Screener",
+    "news": "News feeds", "web_search": "Web search", "web_pages": "Web pages",
 }
-_UNRECOVERABLE = ("not configured", "only supports", "unsupported", "valid 0x", "invalid")
+_UNRECOVERABLE = ("not configured", "only supports", "unsupported", "valid 0x", "invalid", "no url to read", "not available for chain")
 
 
 def _label(source: str) -> str:
@@ -132,10 +134,16 @@ class Web3ResearchAgent:
         else:
             steps.append("No live data needed for this question")
 
+        charts = build_charts(merged, plan, self.settings.max_charts)
+        for chart in charts:
+            await emit(on_event, {"type": "chart", "chart": chart})
+        if charts:
+            steps.append("Charts: " + ", ".join(c["title"] for c in charts))
+
         await emit(on_event, {"type": "status", "stage": "synthesizing", "message": "Writing the analysis"})
-        text, degraded = await self._synthesise(request, plan, merged, on_event)
+        text, degraded, model_used = await self._synthesise(request, plan, merged, on_event, charts)
         steps.append(
-            f"Wrote the answer with {self.settings.synthesis_model}" if not degraded
+            f"Wrote the answer with {model_used}" if not degraded
             else "Language model unavailable; returned the retrieved data instead"
         )
         final = text.rstrip() + _footer(merged)
@@ -151,11 +159,12 @@ class Web3ResearchAgent:
             "success": True, "result": final, "reasoning_steps": steps, "citations": citations,
             "data_sources_used": sources, "query_intent": plan.intent, "merged_data": merged,
             "data_quality_score": score, "tool_trace": trace, "planner": planned["planner"],
-            "execution_time": elapsed,
+            "execution_time": elapsed, "charts": charts,
         }
         self._remember(request, final, research_data)
         return {**research_data, "degraded": degraded, "session_id": self.session_id,
-                "models": {"planner": self.settings.planner_model, "synthesis": self.settings.synthesis_model}}
+                "models": {"planner": planned.get("model") or self.settings.planner_model,
+                           "synthesis": model_used if not degraded else None}}
 
     async def _follow_up(self, request, plan, results, merged, on_event, steps) -> Optional[List[Dict[str, Any]]]:
         """One reflection step. Returns the extra round's results, or ``None`` if nothing more is needed."""
@@ -187,10 +196,11 @@ class Web3ResearchAgent:
         has_data = bool(merged["primary_data"] or merged["supplementary_data"])
         return bool(recoverable) or not has_data
 
-    async def _synthesise(self, request: ResearchRequest, plan: Plan, merged: Dict[str, Any], on_event: EventCallback):
-        """Stream the answer. Returns ``(text, degraded)``; never raises."""
+    async def _synthesise(self, request: ResearchRequest, plan: Plan, merged: Dict[str, Any], on_event: EventCallback,
+                          charts: Optional[List[Dict[str, Any]]] = None):
+        """Stream the answer. Returns ``(text, degraded, model_used)``."""
         if plan.tools:
-            context = build_context(request, plan, merged)
+            context = build_context(request, plan, merged, charts)
         else:
             context = (
                 f"QUESTION: {request.query}\n\nNo live data was retrieved because none was needed. Answer conceptual "
@@ -210,13 +220,13 @@ class Web3ResearchAgent:
                     await emit(on_event, {"type": "token", "text": piece})
             text = "".join(chunks).strip()
             if text:
-                return text, False
+                return text, False, getattr(llm, "used", None) or self.settings.synthesis_model
             raise RuntimeError("model returned an empty answer")
         except Exception as exc:
             logger.error("Synthesis failed: %s", exc)
             if not plan.tools or not (merged["primary_data"] or merged["supplementary_data"]):
                 raise  # nothing useful to fall back to; surface the error to the caller
-            return plain_summary(request, plan, merged), True
+            return plain_summary(request, plan, merged), True, None
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
