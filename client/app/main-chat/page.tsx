@@ -4,10 +4,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import { FileDown, FileSpreadsheet, FileText, Lock, CheckCircle, Settings, Eye, EyeOff, MessageSquare, Clock, Users } from 'lucide-react';
+import { FileDown, FileSpreadsheet, FileText, Clock, Copy, Check, Square, ArrowUp, ChevronDown, Sparkles, Plus } from 'lucide-react';
 import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
-import LoadingSpinner from '../components/LoadingSpinner';
-import { WavyBackground } from '../../components/ui/wavy-background';
+import Markdown from '../components/Markdown';
+import { LiveActivity, ActivitySummary } from '../components/AgentActivity';
+import { API_BASE, streamResearch, type AgentEvent, type ToolProgress } from '../../lib/api';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
@@ -36,6 +37,23 @@ interface ResearchResult {
   merged_data?: any; // Structured data from backend
   data_quality_score?: number;
   tool_results?: any[];
+  tool_trace?: Array<{ tool: string; success: boolean; duration_ms?: number; error?: string | null }>;
+  planner?: string;
+}
+
+const SUGGESTIONS = [
+  'How is Ethereum performing this week?',
+  'Compare Bitcoin vs Solana',
+  'Best stablecoin yields right now',
+  'TVL trend on Arbitrum and top protocols',
+];
+
+interface LiveRun {
+  stage: string;
+  planner?: string;
+  rationale?: string;
+  tools: ToolProgress[];
+  draft: string;
 }
 
 interface ApiStats {
@@ -104,9 +122,13 @@ export default function MainChat() {
     isOnline: false,
   });
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [live, setLive] = useState<LiveRun | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const endOfChatRef = useRef<HTMLDivElement>(null);
   const hasUserMessage = messages.some((m) => m.role === 'user');
   const [vizConfigs, setVizConfigs] = useState<Record<string, VisualizationConfig>>({});
+  const [openViz, setOpenViz] = useState<Record<string, boolean>>({});
 
   const latestAssistantMsg = messages
     .slice()
@@ -125,9 +147,7 @@ export default function MainChat() {
 
   // Sync connected wallet address
   useEffect(() => {
-    if (connectedAddress) {
-      setAddress(connectedAddress);
-    }
+    setAddress(connectedAddress ?? '');
   }, [connectedAddress]);
 
   // Auto-scroll to the newest message
@@ -158,7 +178,7 @@ export default function MainChat() {
     if (showLoading) setLoadingHistory(true);
     
     try {
-      const response = await fetch(`https://airaaagent.onrender.com/api/conversation/${sessionId}`);
+      const response = await fetch(`${API_BASE}/api/conversation/${sessionId}`);
       if (response.ok) {
         const history: ConversationHistory = await response.json();
         setConversationHistory(history);
@@ -245,7 +265,7 @@ export default function MainChat() {
 
   const checkApiHealth = async () => {
     try {
-      const response = await fetch('https://airaaagent.onrender.com/api/health');
+      const response = await fetch(`${API_BASE}/api/health`);
       const data = await response.json();
       setApiStats(prev => ({ ...prev, isOnline: data.status === 'ok' }));
     } catch (error) {
@@ -276,11 +296,22 @@ export default function MainChat() {
     }
   };
 
-  const handleSend = async () => {
-    const trimmed = query.trim();
-    if (!trimmed) return;
+  const stopGenerating = () => abortRef.current?.abort();
 
-    // Push user message
+  const copyMessage = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
+  const handleSend = async (override?: string) => {
+    const trimmed = (override ?? query).trim();
+    if (!trimmed || loading) return;
+
     const userMessage: ChatMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
@@ -291,24 +322,65 @@ export default function MainChat() {
     setQuery('');
 
     setLoading(true);
+    setLive({ stage: 'Starting…', tools: [], draft: '' });
     const startTime = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let finalResult: any = null;
+    let streamError: string | null = null;
+
+    const onEvent = (event: AgentEvent) => {
+      switch (event.type) {
+        case 'status':
+          setLive(prev => prev && { ...prev, stage: event.message });
+          break;
+        case 'plan':
+          setLive(prev => prev && {
+            ...prev,
+            planner: event.planner,
+            rationale: event.rationale,
+            stage: 'Gathering data',
+            tools: event.tools.map(tool => ({ tool, status: 'running' as const })),
+          });
+          break;
+        case 'tool_end':
+          setLive(prev => prev && {
+            ...prev,
+            tools: prev.tools.map(t => t.tool === event.tool
+              ? { tool: t.tool, status: event.success ? 'done' as const : 'failed' as const, duration_ms: event.duration_ms, error: event.error }
+              : t),
+          });
+          break;
+        case 'token':
+          setLive(prev => prev && { ...prev, draft: prev.draft + event.text });
+          break;
+        case 'result':
+          finalResult = event.result;
+          break;
+        case 'error':
+          streamError = event.error;
+          break;
+      }
+    };
 
     try {
-      const response = await fetch('https://airaaagent.onrender.com/api/research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await streamResearch(
+        {
           query: trimmed,
           address: address.trim() || undefined,
           time_range: timeRange,
           session_id: sessionId,
-        }),
-      });
+        },
+        onEvent,
+        controller.signal,
+      );
 
-      const data = await response.json();
+      if (!finalResult) throw new Error(streamError || 'The agent ended without returning a result');
+
+      const data = finalResult;
       const responseTime = Date.now() - startTime;
 
-      // Update session ID if returned from backend
       if (data.session_id && data.session_id !== sessionId) {
         setSessionId(data.session_id);
         localStorage.setItem('airaa-session-id', data.session_id);
@@ -324,23 +396,20 @@ export default function MainChat() {
         session_id: data.session_id || sessionId,
       };
 
-      // Check if this is a greeting response (no API calls, greeting intent)
-      const isGreeting = normalized.success && 
-                        normalized.query_intent === 'greeting' && 
+      // Greetings carry no research data, so render them as plain chat
+      const isGreeting = normalized.success &&
+                        normalized.query_intent === 'greeting' &&
                         (!normalized.data_sources_used || normalized.data_sources_used.length === 0);
 
-      const assistantMessage: ChatMessage = {
+      setMessages(prev => [...prev, {
         id: `a-${Date.now()}`,
         role: 'assistant',
         text: normalized.success
           ? (normalized.result || normalized.data || 'Research completed successfully.')
-          : `There was an issue completing the research.`,
+          : 'There was an issue completing the research.',
         timestamp: new Date().toISOString(),
-        result: isGreeting ? undefined : normalized, // Don't attach result for greetings
-      };
-
-      // Add the new message to the existing messages (don't reload history)
-      setMessages(prev => [...prev, assistantMessage]);
+        result: isGreeting ? undefined : normalized,
+      }]);
 
       setApiStats(prev => ({
         totalQueries: prev.totalQueries + 1,
@@ -351,34 +420,36 @@ export default function MainChat() {
         isOnline: true,
       }));
 
-      // Update conversation history stats but don't reload messages (to avoid overwriting new responses)
+      // Refresh session metadata only; messages are already on screen
       if (data.success && sessionId) {
         setTimeout(() => {
-          // Only update the conversation history metadata, not the messages
-          fetch(`https://airaaagent.onrender.com/api/conversation/${sessionId}`)
+          fetch(`${API_BASE}/api/conversation/${sessionId}`)
             .then(response => response.json())
-            .then((history: ConversationHistory) => {
-              setConversationHistory(history);
-            })
+            .then((history: ConversationHistory) => setConversationHistory(history))
             .catch(error => console.warn('Could not update conversation history:', error));
         }, 1000);
       }
     } catch (error: any) {
-      const assistantErrorMessage: ChatMessage = {
+      const aborted = error?.name === 'AbortError';
+      const message = aborted
+        ? 'Stopped. Ask again whenever you are ready.'
+        : `Could not complete the request: ${error?.message || 'unknown error'}`;
+      setMessages(prev => [...prev, {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        text: `Network error: ${error?.message || 'Unknown error'}`,
+        text: message,
         timestamp: new Date().toISOString(),
-        result: {
-        success: false,
-        error: `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        timestamp: new Date().toISOString(),
+        result: aborted ? undefined : {
+          success: false,
+          error: message,
+          timestamp: new Date().toISOString(),
           query: trimmed,
         },
-      };
-      setMessages(prev => [...prev, assistantErrorMessage]);
-      setApiStats(prev => ({ ...prev, isOnline: false }));
+      }]);
+      if (!aborted) setApiStats(prev => ({ ...prev, isOnline: false }));
     } finally {
+      abortRef.current = null;
+      setLive(null);
       setLoading(false);
     }
   };
@@ -641,289 +712,167 @@ export default function MainChat() {
   // Removed URL query parameter handling
 
   return (
-    <div className="relative min-h-screen bg-[#0a0f1a] text-white overflow-x-hidden">
-      <WavyBackground
-        containerClassName="absolute inset-0 z-0"
-        backgroundFill="#0a0f1a"
-        colors={["#0B1220", "#0F172A", "#1E293B", "#1D4ED8", "#0EA5E9"]}
-        waveWidth={80}
-        blur={6}
-        speed="slow"
-        waveOpacity={0.8}
-      />
-      {/* Header with Connect Button */}
-      <header className="relative z-20 max-w-5xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 md:pt-8 pb-3 sm:pb-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 w-full sm:w-auto">
-            <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent leading-tight">
-              AIRAA Research Agent
-            </h1>
-            {sessionId && (
-              <button
-                onClick={() => setShowSessionInfo(!showSessionInfo)}
-                className="text-xs sm:text-sm px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full border border-white/30 hover:border-white/50 flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
-                title="Session Information"
-              >
-                <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span className="sm:hidden">Active</span>
-                <span className="hidden sm:inline md:hidden">Session</span>
-                <span className="hidden md:inline">Session Active</span>
-              </button>
-            )}
+    <div className="flex h-dvh flex-col overflow-hidden bg-[#070b14] text-white"
+      style={{ backgroundImage: 'radial-gradient(60rem 30rem at 50% -10%, rgba(14,165,233,0.12), transparent 60%)' }}>
+      {/* Header */}
+      <header className="shrink-0 border-b border-white/[0.07] bg-[#070b14]/80 backdrop-blur-md">
+        <div className="mx-auto flex h-14 w-full max-w-3xl items-center gap-3 px-3 sm:px-4">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-400/15 text-cyan-300">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <h1 className="text-base font-semibold tracking-tight">AIRAA</h1>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${apiStats.isOnline ? 'bg-emerald-400' : 'bg-white/25'}`}
+              title={apiStats.isOnline ? 'Agent online' : 'Agent offline'}
+            />
           </div>
-          <div className="w-full sm:w-auto flex justify-end">
-            <ConnectButton />
-          </div>
-        </div>
-        
-        {/* Session Information Panel */}
-        {showSessionInfo && sessionId && (
-          <div className="mt-3 sm:mt-4 rounded-2xl border border-white/20 backdrop-blur-xl bg-white/5 p-3 sm:p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-              <h3 className="text-base sm:text-lg font-semibold flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="hidden sm:inline">Conversation Session</span>
-                <span className="sm:hidden">Session</span>
-                {loadingHistory && <div className="text-xs text-white/60">(Loading...)</div>}
-              </h3>
+          <div className="ml-auto flex items-center gap-2">
+            {hasUserMessage && (
               <button
                 onClick={startNewSession}
-                className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/30 hover:border-white/50 transition-colors touch-manipulation self-start sm:self-auto"
+                className="flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs text-white/70 transition hover:border-white/40 hover:text-white touch-manipulation"
+                title="Start a new conversation"
               >
-                New Session
+                <Plus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">New chat</span>
               </button>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
-              <div className="sm:col-span-2 md:col-span-1">
-                <div className="text-white/60 mb-1 text-xs sm:text-sm">Session ID</div>
-                <div className="font-mono text-xs sm:text-sm text-white/80 break-all bg-white/5 rounded-lg p-2">{sessionId}</div>
-              </div>
-              
-              {conversationHistory && (
-                <>
-                  <div>
-                    <div className="text-white/60 mb-1 flex items-center gap-1 text-xs sm:text-sm">
-                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      Messages
-                    </div>
-                    <div className="text-white/80 text-sm">{conversationHistory.message_count} messages</div>
-                  </div>
-                  
-                  <div className="sm:col-span-2 md:col-span-1">
-                    <div className="text-white/60 mb-1 text-xs sm:text-sm">Created</div>
-                    <div className="text-white/80 text-xs sm:text-sm">{new Date(conversationHistory.created_at).toLocaleString()}</div>
-                  </div>
-                  
-                  <div className="sm:col-span-2 md:col-span-1">
-                    <div className="text-white/60 mb-1 text-xs sm:text-sm">Last Activity</div>
-                    <div className="text-white/80 text-xs sm:text-sm">{new Date(conversationHistory.last_activity).toLocaleString()}</div>
-                  </div>
-                </>
-              )}
-            </div>
-            
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <div className="text-xs sm:text-sm text-white/50 flex flex-col sm:flex-row sm:items-center gap-2">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span>Memory active</span>
-                </div>
-                {conversationHistory && conversationHistory.message_count > 0 && (
-                  <span className="text-green-400 text-xs">({conversationHistory.message_count} messages loaded)</span>
-                )}
-              </div>
-            </div>
+            )}
+            <ConnectButton showBalance={false} chainStatus="icon" accountStatus={{ smallScreen: 'avatar', largeScreen: 'address' }} />
           </div>
-        )}
+        </div>
       </header>
 
-      {!isConnected ? (
-        // Wallet Connection Required Screen
-        <main className="relative z-10 max-w-3xl mx-auto px-3 sm:px-4 py-8 sm:py-12 md:py-16">
-          <div className="text-center space-y-4 sm:space-y-6">
-            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.15] hover:border-blue-500/40 transition-colors duration-300 backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.06] shadow-2xl p-6 sm:p-8" style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-            }}>
-              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 sm:mb-6 rounded-full border border-white/20 flex items-center justify-center bg-white/5">
-                <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-white/60" />
-              </div>
-              <h2 className="text-xl sm:text-2xl font-semibold mb-2 sm:mb-3">Connect Your Wallet</h2>
-              <p className="text-sm sm:text-base text-white/70 mb-4 sm:mb-6 leading-relaxed px-2">
-                To access AIRAA's research capabilities and personalized on-chain analytics, 
-                please connect your wallet using the button above.
-              </p>
-              <div className="text-xs sm:text-sm text-white/50 flex flex-col sm:flex-row items-center justify-center gap-2">
-                <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span className="text-center">Your wallet connection is secure and only used for address-based analytics</span>
-              </div>
-            </div>
-          </div>
-        </main>
-      ) : (
-        // Chat Interface (only shown when wallet is connected)
-      <main className="relative z-10 max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 md:py-8">
-        <div className="rounded-2xl sm:rounded-3xl border border-white/[0.15] hover:border-blue-500/40 transition-colors duration-300 backdrop-blur-2xl bg-white/[0.05] hover:bg-white/[0.06] shadow-2xl p-4 sm:p-6 md:p-8" style={{
-          background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-        }}>
-
-
+      <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-3 sm:px-4">
           {/* Messages */}
           <div
-            className={`overflow-y-auto pr-0.5 sm:pr-1 space-y-3 sm:space-y-4 transition-[height] duration-500 ease-out`}
-            style={{ height: hasUserMessage ? '65vh' : '55vh' }}
+            className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4 pr-1"
             id="chat-scroll"
+            aria-live="polite"
           >
-            {messages.map((m) => (
-              <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`relative max-w-[92%] sm:max-w-[85%] rounded-xl sm:rounded-2xl border backdrop-blur-xl shadow-lg p-3 sm:p-4 ${
-                    m.role === 'user'
-                      ? 'border-white/[0.2] bg-white/[0.08]'
-                      : 'border-white/[0.15] bg-white/[0.05]'
-                  }`}
-                  style={{
-                    background: m.role === 'user' 
-                      ? 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.06) 100%)'
-                      : 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                  }}
-                >
-                  <div className="text-xs sm:text-sm text-white/50 mb-1 sm:mb-2">
-                    {m.role === 'user' ? 'You' : 'AIRAA'} 
-                    {m.role === 'assistant' && !m.result && ' 💬'} {/* Greeting indicator */}
-                    • {new Date(m.timestamp).toLocaleTimeString()}
-                  </div>
-                  {m.text && (
-                    <div className={`whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px] md:text-base ${m.role === 'user' ? '' : 'font-[var(--font-jp)]'}`}>{m.text}</div>
-                  )}
+            {messages.map((m) => {
+              const isUser = m.role === 'user';
+              const res = m.result;
+              const canExport = !!res && res.success && !!(res.data || res.result || res.merged_data);
+              const hasStructured = !!res?.success && !!res.merged_data && typeof res.merged_data === 'object' && Object.keys(res.merged_data).length > 0;
 
-                  {m.result && (
-                    <div className="mt-2 sm:mt-3 space-y-2 sm:space-y-3">
-                      {/* Status and context tags */}
-                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                        <div className={`inline-block text-xs sm:text-sm px-2 sm:px-2.5 py-1 sm:py-1.5 rounded border ${
-                          m.result.success
-                            ? 'border-green-400 text-green-300'
-                            : 'border-red-400 text-red-300'
-                        }`}>
-                          {m.result.success ? 'Success' : 'Error'}
-                        </div>
-                        
-                        {/* Show session context if available */}
-                        {m.result.session_id && (
-                          <div className="inline-block text-xs sm:text-sm px-2 sm:px-2.5 py-1 sm:py-1.5 rounded border border-blue-400/50 text-blue-300">
-                            <MessageSquare className="w-3 h-3 inline mr-1" />
-                            <span className="hidden sm:inline">Memory Active</span>
-                            <span className="sm:hidden">Memory</span>
-                          </div>
-                        )}
-                        
-                        {/* Show conversation history count if available */}
-                        {conversationHistory && conversationHistory.message_count > 0 && (
-                          <div className="inline-block text-xs sm:text-sm px-2 sm:px-2.5 py-1 sm:py-1.5 rounded border border-purple-400/50 text-purple-300">
-                            <Clock className="w-3 h-3 inline mr-1" />
-                            <span className="hidden sm:inline">{conversationHistory.message_count} msgs</span>
-                            <span className="sm:hidden">{conversationHistory.message_count}</span>
-                          </div>
-                        )}
-                      </div>
+              return (
+                <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`group relative ${
+                      isUser
+                        ? 'max-w-[85%] rounded-2xl rounded-br-md bg-cyan-400/[0.12] px-4 py-2.5'
+                        : 'w-full'
+                    }`}
+                  >
+                    {!isUser && m.text && (
+                      <button
+                        onClick={() => copyMessage(m.id, m.text!)}
+                        className="absolute -top-1 right-0 rounded p-1 text-white/35 transition hover:bg-white/10 hover:text-white sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+                        aria-label="Copy answer"
+                        title="Copy answer"
+                      >
+                        {copiedId === m.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    )}
 
-                      {/* Visualization */}
-                      {m.result.success && m.result.data ? (
-                        <div className="rounded-lg sm:rounded-xl border border-white/20 p-2 sm:p-3 comic-inner">
-                          <DataVisualization
-                            data={m.result.data}
-                            title="Research Results"
-                            config={vizConfigs[m.id]}
-                            onConfigChange={(cfg) => setVizConfigs(prev => ({ ...prev, [m.id]: cfg }))}
+                    {m.text && (isUser
+                      ? <div className="whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px]">{m.text}</div>
+                      : res && !res.success
+                        ? <div className="text-sm text-red-200">{m.text}</div>
+                        : <Markdown>{m.text}</Markdown>
+                    )}
+
+                    {res && (
+                      <div className="mt-3 space-y-3">
+                        {!res.success && res.error && (
+                          <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-red-400/30 bg-red-900/10 p-3 text-xs text-red-300">{res.error}</pre>
+                        )}
+
+                        {res.success && (
+                          <ActivitySummary
+                            trace={res.tool_trace}
+                            steps={res.reasoning_steps}
+                            sources={res.data_sources_used}
+                            seconds={res.execution_time}
+                            planner={res.planner}
                           />
-                        </div>
-                      ) : m.result.error ? (
-                        <pre className="text-xs sm:text-sm text-red-300 whitespace-pre-wrap border border-red-400/30 rounded-lg sm:rounded-xl p-2 sm:p-3 bg-red-900/10 overflow-x-auto">{m.result.error}</pre>
-                      ) : null}
+                        )}
 
-                      {/* Metadata grid */}
-                      {(m.result.reasoning_steps || m.result.citations) && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
-                          {m.result.reasoning_steps && m.result.reasoning_steps.length > 0 && (
-                            <div className="rounded-lg sm:rounded-xl border border-white/20 p-2 sm:p-3">
-                              <div className="text-sm sm:text-base md:text-lg font-semibold mb-2">
-                                <span className="hidden sm:inline">Reasoning Steps</span>
-                                <span className="sm:hidden">Steps</span>
+                        {hasStructured && (
+                          <div className="rounded-xl border border-white/10 bg-black/20">
+                            <button
+                              onClick={() => setOpenViz(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-white/60 hover:text-white/80"
+                              aria-expanded={!!openViz[m.id]}
+                            >
+                              <span className="font-medium text-white/80">Explore the data</span>
+                              <span>· tables, charts, raw JSON</span>
+                              <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${openViz[m.id] ? 'rotate-180' : ''}`} />
+                            </button>
+                            {openViz[m.id] && (
+                              <div className="border-t border-white/10 p-2 sm:p-3">
+                                <DataVisualization
+                                  data={res.merged_data}
+                                  title="Research Data"
+                                  config={vizConfigs[m.id]}
+                                  onConfigChange={(cfg) => setVizConfigs(prev => ({ ...prev, [m.id]: cfg }))}
+                                />
                               </div>
-                              <div className="space-y-1">
-                                {m.result.reasoning_steps.map((s, i) => (
-                                  <div key={i} className="text-xs sm:text-sm text-white/80 leading-relaxed">{i + 1}. {s}</div>
-                              ))}
-                            </div>
+                            )}
                           </div>
                         )}
-                          {m.result.citations && m.result.citations.length > 0 && (
-                            <div className="rounded-lg sm:rounded-xl border border-white/20 p-2 sm:p-3">
-                              <div className="text-sm sm:text-base md:text-lg font-semibold mb-2">
-                                <span className="hidden sm:inline">Data Sources</span>
-                                <span className="sm:hidden">Sources</span>
-                              </div>
-                              <div className="space-y-1">
-                                {m.result.citations.map((c: any, i: number) => (
-                                  <div key={i} className="text-xs sm:text-sm text-white/80">
-                                    <span className="font-medium break-words">{c.source}</span>
-                                    <div className="text-white/50 text-xs">{c.timestamp}</div>
-                                </div>
-                              ))}
-                            </div>
+
+                        {canExport && (
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                            {([
+                              ['json', 'JSON', FileDown],
+                              ['excel', 'Excel', FileSpreadsheet],
+                              ['pdf', 'PDF', FileText],
+                            ] as const).map(([fmt, label, Icon]) => (
+                              <button
+                                key={fmt}
+                                onClick={() => downloadResult(res, fmt)}
+                                className="flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1.5 text-xs text-white/70 transition-colors hover:border-white/50 hover:text-white touch-manipulation"
+                              >
+                                <Icon className="h-3.5 w-3.5" />
+                                {label}
+                              </button>
+                            ))}
                           </div>
                         )}
                       </div>
                     )}
+                  </div>
+                </div>
+              );
+            })}
 
-                      {/* Actions */}
-                      {m.result && m.result.success && (m.result.data || m.result.result || m.result.merged_data) && (
-                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                          <button
-                            onClick={() => downloadResult(m.result!, 'json')}
-                            className="px-2.5 sm:px-3.5 py-1.5 rounded-lg border border-white/30 text-xs sm:text-sm hover:border-white flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
-                          >
-                            <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                            <span className="hidden xs:inline">JSON</span>
-                            <span className="xs:hidden">J</span>
-                          </button>
-                          <button
-                            onClick={() => downloadResult(m.result!, 'excel')}
-                            className="px-2.5 sm:px-3.5 py-1.5 rounded-lg border border-white/30 text-xs sm:text-sm hover:border-white flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
-                          >
-                            <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                            <span className="hidden xs:inline">Excel</span>
-                            <span className="xs:hidden">XL</span>
-                          </button>
-                          <button
-                            onClick={() => downloadResult(m.result!, 'pdf')}
-                            className="px-2.5 sm:px-3.5 py-1.5 rounded-lg border border-white/30 text-xs sm:text-sm hover:border-white flex items-center gap-1.5 sm:gap-2 transition-colors touch-manipulation"
-                          >
-                            <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                            <span className="hidden xs:inline">PDF</span>
-                            <span className="xs:hidden">P</span>
-                          </button>
-                  </div>
-                      )}
-                  </div>
-                )}
+            {!hasUserMessage && !loading && (
+              <div className="pt-2">
+                <div className="mb-2 flex items-center gap-1.5 text-xs text-white/50">
+                  <Sparkles className="h-3.5 w-3.5 text-cyan-300" />
+                  Try asking
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => handleSend(s)}
+                      className="rounded-full border border-white/20 bg-white/[0.04] px-3 py-1.5 text-xs sm:text-sm text-white/75 transition-colors hover:border-cyan-300/50 hover:bg-cyan-300/10 hover:text-white touch-manipulation"
+                    >
+                      {s}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
 
-            {loading && (
+            {loading && live && (
               <div className="flex justify-start">
-                <div className="relative max-w-[92%] sm:max-w-[85%] rounded-xl sm:rounded-2xl border border-white/[0.15] backdrop-blur-xl bg-white/[0.05] p-3 sm:p-4 shadow-lg"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                  }}>
-                  <div className="text-xs sm:text-sm text-white/60 mb-1 sm:mb-2">AIRAA • thinking…</div>
-                  <LoadingSpinner size="sm" text="Researching..." />
+                <div className="w-full space-y-3">
+                  <LiveActivity stage={live.stage} planner={live.planner} rationale={live.rationale} tools={live.tools} />
+                  {live.draft && <Markdown>{live.draft}</Markdown>}
                 </div>
               </div>
             )}
@@ -931,179 +880,75 @@ export default function MainChat() {
             <div ref={endOfChatRef} />
           </div>
 
-          {/* Advanced options toggle */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mt-3 sm:mt-4 gap-2 sm:gap-4">
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-xs sm:text-sm px-3 sm:px-3.5 py-1.5 rounded-full border border-white/30 hover:border-white flex items-center gap-1.5 sm:gap-2 touch-manipulation"
-            >
-              {showAdvanced ? <EyeOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
-              <span className="hidden sm:inline">{showAdvanced ? 'Hide settings' : 'Show settings'}</span>
-              <span className="sm:hidden">{showAdvanced ? 'Hide' : 'Settings'}</span>
-            </button>
-            <div className="text-xs sm:text-sm text-white/60 space-y-1 sm:space-y-0">
-              <div className="sm:hidden">
-                <div>Range: {timeRange}</div>
-                {address && <div>Address: {address.slice(0, 6)}...{address.slice(-4)}</div>}
-                {sessionId && <div>Session: {sessionId.slice(-8)}</div>}
-              </div>
-              <div className="hidden sm:block">
-                Time Range: {timeRange}
-                {address ? ` • Address: ${address.slice(0, 6)}...${address.slice(-4)}` : ''}
-                {sessionId ? ` • Session: ${sessionId.slice(-8)}` : ''}
-              </div>
-            </div>
-          </div>
-
-          {showAdvanced && (
-            <div className="mt-3 space-y-3 sm:space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs sm:text-sm text-white/70 mb-1 sm:mb-2">Connected Wallet Address</label>
-                  <input
-                    type="text"
-                    value={address}
-                    readOnly
-                    placeholder="Connected wallet address"
-                    className="w-full bg-white/5 border-2 border-white/20 rounded-lg sm:rounded-xl px-3 py-2 text-xs sm:text-sm text-white/80 cursor-not-allowed"
-                  />
-                  <div className="text-xs sm:text-sm text-white/60 mt-1 sm:mt-2 flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">Automatically populated from connected wallet</span>
-                    <span className="sm:hidden">Auto-populated from wallet</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs sm:text-sm text-white/70 mb-1 sm:mb-2">Time Range</label>
-                  <select
-                    value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value)}
-                    className="w-full bg-transparent border-2 border-white/20 rounded-lg sm:rounded-xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-white touch-manipulation"
-                  >
-                    <option className="bg-black" value="1d">Last 24 Hours</option>
-                    <option className="bg-black" value="7d">Last 7 Days</option>
-                    <option className="bg-black" value="30d">Last 30 Days</option>
-                    <option className="bg-black" value="90d">Last 90 Days</option>
-                    <option className="bg-black" value="1y">Last Year</option>
-                  </select>
-                </div>
-              </div>
-              
-              {/* Session Management */}
-              <div className="border-t border-white/10 pt-3 sm:pt-4">
-                <label className="block text-xs sm:text-sm text-white/70 mb-2">Conversation Memory</label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-xs sm:text-sm text-white/60 mb-1 sm:mb-2">Current Session</div>
-                    <div className="font-mono text-xs text-white/80 bg-white/5 rounded-lg p-2 break-all">
-                      {sessionId || 'No session active'}
-                    </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row md:flex-col gap-2">
-                    <button
-                      onClick={startNewSession}
-                      className="px-3 py-2 text-xs sm:text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2 touch-manipulation justify-center sm:justify-start"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">New Conversation</span>
-                      <span className="sm:hidden">New Chat</span>
-                    </button>
-                    <button
-                      onClick={() => refreshConversationHistory()}
-                      className="px-3 py-2 text-xs sm:text-sm rounded-lg border border-white/30 hover:border-white/50 transition-colors flex items-center gap-2 touch-manipulation justify-center sm:justify-start"
-                      disabled={!sessionId}
-                    >
-                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">Refresh History</span>
-                      <span className="sm:hidden">Refresh</span>
-                    </button>
-                  </div>
-                </div>
-                
-                {conversationHistory && (
-                  <div className="mt-3 text-xs sm:text-sm">
-                    <div className="text-white/60 mb-1 sm:mb-2 text-xs sm:text-sm">Session Statistics</div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 text-xs">
-                      <div>
-                        <div className="text-white/50">Messages</div>
-                        <div className="text-white/80 flex items-center gap-1">
-                          {conversationHistory.message_count}
-                          {conversationHistory.message_count > 0 && <CheckCircle className="w-3 h-3 text-green-400" />}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-white/50">Created</div>
-                        <div className="text-white/80 text-xs">{new Date(conversationHistory.created_at).toLocaleDateString()}</div>
-                      </div>
-                      <div className="col-span-2 md:col-span-1">
-                        <div className="text-white/50">Last Active</div>
-                        <div className="text-white/80 text-xs">{new Date(conversationHistory.last_activity).toLocaleDateString()}</div>
-                      </div>
-                    </div>
-                    {conversationHistory.message_count > 0 && (
-                      <div className="mt-2 text-xs text-green-400 flex items-center gap-1">
-                        <MessageSquare className="w-3 h-3" />
-                        <span className="hidden sm:inline">Previous conversation loaded - context is preserved</span>
-                        <span className="sm:hidden">Context preserved</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Input */}
-          <div className="mt-4 sm:mt-6 flex items-end gap-2 sm:gap-3">
-            <div className="flex-1 relative">
+          {/* Composer */}
+          <div className="shrink-0 pb-3 pt-2 sm:pb-4">
+            <div className="rounded-2xl border border-white/[0.12] bg-white/[0.05] p-2 transition-colors focus-within:border-cyan-300/40 focus-within:bg-white/[0.07]">
               <textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask anything about Web3, DeFi, on-chain data..."
-                className={`w-full ${hasUserMessage ? 'h-20 sm:h-24 md:h-28 lg:h-32' : 'h-16 sm:h-20 md:h-24 lg:h-28'} bg-white/[0.05] backdrop-blur-sm border border-white/[0.15] rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 placeholder-white/40 focus:outline-none focus:border-white/[0.3] focus:bg-white/[0.08] resize-none text-white text-sm sm:text-base md:text-lg transition-[height] duration-500 ease-out`}
-                style={{
-                  background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
-                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                }}
+                rows={1}
+                placeholder="Ask about a token, protocol, wallet or market…"
+                aria-label="Message"
+                className="max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm text-white placeholder-white/35 focus:outline-none sm:text-base"
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     handleSend();
                   }
                 }}
               />
-              {/* Mobile keyboard hint */}
-              <div className="absolute bottom-1 right-2 text-xs text-white/30 pointer-events-none sm:hidden">
-                Enter to send
+              <div className="flex items-center gap-2 pt-1">
+                <label className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-white/55 transition hover:bg-white/[0.06] hover:text-white/80">
+                  <Clock className="h-3.5 w-3.5" />
+                  <select
+                    value={timeRange}
+                    onChange={(e) => setTimeRange(e.target.value)}
+                    className="cursor-pointer bg-transparent focus:outline-none"
+                    aria-label="Time range"
+                  >
+                    <option className="bg-slate-900" value="1d">24 hours</option>
+                    <option className="bg-slate-900" value="7d">7 days</option>
+                    <option className="bg-slate-900" value="30d">30 days</option>
+                    <option className="bg-slate-900" value="90d">90 days</option>
+                    <option className="bg-slate-900" value="1y">1 year</option>
+                  </select>
+                </label>
+                {!address && (
+                  <span className="hidden text-[11px] text-white/35 sm:inline">Connect a wallet for on-chain analysis</span>
+                )}
+                {address && (
+                  <span className="hidden items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[11px] text-white/40 sm:flex" title={address}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
+                    {address.slice(0, 6)}…{address.slice(-4)}
+                  </span>
+                )}
+                {loading ? (
+                  <button
+                    onClick={stopGenerating}
+                    className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-red-400/40 bg-red-500/10 text-red-200 transition hover:bg-red-500/20 touch-manipulation"
+                    aria-label="Stop"
+                    title="Stop"
+                  >
+                    <Square className="h-4 w-4 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!query.trim()}
+                    className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-400 text-slate-900 transition hover:bg-cyan-300 active:scale-95 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30 touch-manipulation"
+                    aria-label="Send"
+                    title="Send (Enter)"
+                  >
+                    <ArrowUp className="h-5 w-5" />
+                  </button>
+                )}
               </div>
             </div>
-            <button
-              onClick={handleSend}
-              disabled={loading || !query.trim()}
-              className={`h-10 sm:h-12 px-4 sm:px-6 rounded-lg sm:rounded-xl backdrop-blur-sm border transition-all duration-200 font-medium text-sm sm:text-base touch-manipulation ${
-                loading || !query.trim()
-                  ? 'border-white/[0.1] bg-white/[0.03] text-white/30 cursor-not-allowed'
-                  : 'border-white/[0.2] bg-white/[0.08] text-white hover:bg-white/[0.15] hover:border-white/[0.3] shadow-lg active:scale-95'
-              }`}
-              style={!(loading || !query.trim()) ? {
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.06) 100%)',
-                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-              } : {}}
-            >
-              {loading ? (
-                <span className="flex items-center gap-1">
-                  <span className="hidden sm:inline">...</span>
-                  <span className="sm:hidden">•••</span>
-                </span>
-              ) : (
-                'Send'
-              )}
-            </button>
+            <div className="mt-1.5 text-center text-[11px] text-white/30">
+              AI-generated research, not financial advice
+            </div>
           </div>
-        </div>
-
       </main>
-      )}
     </div>
   );
 }
