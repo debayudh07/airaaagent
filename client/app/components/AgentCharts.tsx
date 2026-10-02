@@ -78,7 +78,7 @@ const tooltip = (fmt: (v: unknown) => string, cursor: object) => (
   />
 );
 
-function BarBody({ spec, color, horizontal }: { spec: ChartSpec; color: (i: number) => string; horizontal: boolean }) {
+function barChart({ spec, color, horizontal }: { spec: ChartSpec; color: (i: number) => string; horizontal: boolean }) {
   const fmt = formatter(spec.y_format, false);
   const tip = tooltip(exact(spec.y_format, false), { fill: 'rgba(11,13,18,0.05)' });
   const multi = spec.series.length > 1;
@@ -120,7 +120,7 @@ function BarBody({ spec, color, horizontal }: { spec: ChartSpec; color: (i: numb
   );
 }
 
-function SeriesBody({ spec, color }: { spec: ChartSpec; color: (i: number) => string }) {
+function seriesChart({ spec, color }: { spec: ChartSpec; color: (i: number) => string }) {
   const signed = spec.kind === 'line';
   const fmt = formatter(spec.y_format, signed);
   const multi = spec.series.length > 1;
@@ -182,9 +182,10 @@ function ChartCard({ spec, index, wide, narrow }: { spec: ChartSpec; index: numb
       </figcaption>
       <div className="w-full" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
+          {/* Called, not mounted as components: ResponsiveContainer must hand its width/height straight to the chart element. */}
           {spec.kind === 'bar'
-            ? <BarBody spec={spec} color={color} horizontal={horizontal} />
-            : <SeriesBody spec={spec} color={color} />}
+            ? barChart({ spec, color, horizontal })
+            : seriesChart({ spec, color })}
         </ResponsiveContainer>
       </div>
     </figure>
