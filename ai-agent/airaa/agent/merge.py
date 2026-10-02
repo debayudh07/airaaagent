@@ -69,6 +69,16 @@ def merge_results(results: List[Dict[str, Any]], merged: Dict[str, Any] | None =
             _merge_etherscan(merged, data, info)
         elif source == "defillama":
             _merge_defillama(merged, data, info)
+        elif source == "coingecko":
+            _merge_coingecko(merged, data)
+        elif source == "dexscreener":
+            merged["supplementary_data"]["dex_screener"] = {"type": "dex_screener", **(data or {})}
+        elif source == "news":
+            merged["supplementary_data"]["news"] = {"type": "news", **(data or {})}
+        elif source == "web_search":
+            merged["supplementary_data"]["web_results"] = {"type": "web_results", **(data or {})}
+        elif source == "web_pages":
+            merged["supplementary_data"]["web_pages"] = {"type": "web_pages", **(data or {})}
 
     attempted, ok = meta["tools_attempted"], meta["tools_succeeded"]
     meta["completeness_score"] = round(100.0 * ok / attempted, 1) if attempted else 0.0
@@ -218,3 +228,37 @@ def _merge_defillama(merged: Dict[str, Any], data: Any, info: Dict[str, Any]) ->
         supplementary["defillama_prices"] = {"type": "prices", "coins": data.get("coins", data), "source": "defillama"}
     else:
         supplementary["defillama_data"] = {"type": "defillama_data", "endpoint": info.get("endpoint"), "data": data}
+
+
+# ------------------------------------------------------------------ CoinGecko
+def _merge_coingecko(merged: Dict[str, Any], data: Any) -> None:
+    """CoinMarketCap stays canonical for prices; CoinGecko fills coins it did not return.
+
+    Merge order is not guaranteed, so a CoinMarketCap row that arrives later overwrites (see
+    ``_merge_coinmarketcap``) and a CoinGecko row never replaces an existing one.
+    """
+    if not isinstance(data, dict):
+        return
+    primary, sup = merged["primary_data"], merged["supplementary_data"]
+    for row in data.get("markets") or []:
+        key = f"market_{row.get('symbol')}"
+        if key not in primary:
+            primary[key] = {"type": "market_data", **row, "source": "coingecko"}
+        else:  # keep CoinGecko-only fields (ATH, FDV) alongside the CMC row
+            for extra in ("ath", "ath_change_percentage", "ath_date", "fully_diluted_valuation"):
+                if row.get(extra) is not None:
+                    primary[key].setdefault(extra, row[extra])
+    if data.get("history"):
+        sup["price_history"] = {"type": "price_history", "source": "coingecko", **data["history"]}
+    if data.get("trending"):
+        sup["trending"] = {"type": "trending", "source": "coingecko", "coins": data["trending"]}
+    if data.get("global") and "global_metrics" not in sup:
+        g = data["global"]
+        sup["global_metrics"] = {
+            "type": "global_metrics", "total_market_cap": g.get("total_market_cap_usd"),
+            "total_volume_24h": g.get("total_volume_usd"), "bitcoin_dominance": g.get("btc_dominance"),
+            "ethereum_dominance": g.get("eth_dominance"), "active_cryptocurrencies": g.get("active_cryptocurrencies"),
+            "market_cap_change_24h_pct": g.get("market_cap_change_24h_pct"), "source": "coingecko",
+        }
+    if data.get("fear_greed"):
+        sup["fear_greed"] = {"type": "fear_greed", "source": "alternative.me", **data["fear_greed"]}
