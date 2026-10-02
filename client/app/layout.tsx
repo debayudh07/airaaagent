@@ -21,7 +21,7 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "AIRAA Research Agent",
-  description: "Anime-inspired Web3 intelligence chat interface",
+  description: "AI research agent for Web3: live market, DeFi and on-chain data in one conversation.",
 };
 
 export default function RootLayout({

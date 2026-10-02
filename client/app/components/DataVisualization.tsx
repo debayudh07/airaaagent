@@ -22,19 +22,11 @@ import {
 
 export type ChartType = 'line' | 'bar' | 'area' | 'pie';
 export interface VisualizationConfig {
-  mode: 'formatted' | 'table' | 'json' | 'chart' | 'metrics' | 'ai_suggestions';
+  mode: 'formatted' | 'table' | 'json' | 'chart' | 'metrics';
   chartType?: ChartType;
   datasetPath?: string; // JSON path to the array used for charting
   xKey?: string;
   yKey?: string;
-}
-
-interface AISuggestion {
-  id: string;
-  title: string;
-  description: string;
-  action: () => void;
-  icon: string;
 }
 
 interface DataVisualizationProps {
@@ -46,7 +38,6 @@ interface DataVisualizationProps {
 
 export default function DataVisualization({ data, title, config, onConfigChange }: DataVisualizationProps) {
   const [localConfig, setLocalConfig] = useState<VisualizationConfig>({ mode: 'formatted' });
-  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
 
 
 
@@ -63,98 +54,11 @@ export default function DataVisualization({ data, title, config, onConfigChange 
     });
   };
 
-  // Generate AI suggestions based on data analysis using Gemini
-  const generateAISuggestions = useMemo((): AISuggestion[] => {
-    if (!data) return [];
-
-    // Always include basic visualization options
-    const basicSuggestions: AISuggestion[] = [
-      {
-        id: 'formatted_view',
-        title: 'Smart Formatted View',
-        description: 'AI-enhanced formatting with highlighted insights',
-        icon: '📋',
-        action: () => setConfig({ ...localConfig, mode: 'formatted' })
-      },
-      {
-        id: 'table_view',
-        title: 'Data Table',
-        description: 'Structured table view of all data points',
-        icon: '📊',
-        action: () => setConfig({ ...localConfig, mode: 'table' })
-      }
-    ];
-
-    // Check for array data for charts
-    if (Array.isArray(data) || (typeof data === 'object' && Object.values(data).some(v => Array.isArray(v)))) {
-      basicSuggestions.push({
-        id: 'chart_analysis',
-        title: 'Interactive Charts',
-        description: 'Visualize trends and patterns with dynamic charts',
-        icon: '📈',
-        action: () => setConfig({ ...localConfig, mode: 'chart', chartType: 'line' })
-      });
-
-      basicSuggestions.push({
-        id: 'metrics_dashboard',
-        title: 'Metrics Dashboard',
-        description: 'Key performance indicators and statistical summaries',
-        icon: '🧮',
-        action: () => setConfig({ ...localConfig, mode: 'metrics' })
-      });
-    }
-
-
-
-    return basicSuggestions;
-  }, [data, localConfig]);
-
-
-
-
-
-
-
-
-
-
-
-
-
   const viewMode = localConfig.mode ?? 'formatted';
 
   const renderFormattedData = (obj: any, depth = 0): React.JSX.Element => {
     if (typeof obj === 'string') {
-      // Check if it's a markdown-like formatted research response
-      if (obj.includes('**') || obj.includes('🔍') || obj.includes('📊')) {
-        return (
-          <div className="space-y-4">
-            {obj.split('\n\n').map((section, index) => (
-              <div key={index} className="bg-gray-800/30 rounded-lg p-4 border border-gray-600/30">
-                <div 
-                  className="text-gray-200 whitespace-pre-wrap"
-                  dangerouslySetInnerHTML={{
-                    __html: section
-                      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-cyan-400">$1</strong>')
-                      .replace(/🔍/g, '<span class="text-2xl">🔍</span>')
-                      .replace(/📊/g, '<span class="text-2xl">📊</span>')
-                      .replace(/🌐/g, '<span class="text-2xl">🌐</span>')
-                      .replace(/📈/g, '<span class="text-2xl">📈</span>')
-                      .replace(/🎯/g, '<span class="text-2xl">🎯</span>')
-                      .replace(/📋/g, '<span class="text-2xl">📋</span>')
-                      .replace(/💡/g, '<span class="text-2xl">💡</span>')
-                      .replace(/•/g, '<span class="text-cyan-400">•</span>')
-                      .replace(/\$([\d,]+\.?\d*)/g, '<span class="text-green-400 font-bold">$$$1</span>')
-                      .replace(/#(\d+)/g, '<span class="text-purple-400 font-bold">#$1</span>')
-                      .replace(/(\d+\.?\d*)%/g, '<span class="text-yellow-400 font-bold">$1%</span>')
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        );
-      }
-      return <div className="text-gray-300 whitespace-pre-wrap">{obj}</div>;
+      return <div className="whitespace-pre-wrap text-gray-300">{obj}</div>;
     }
 
     if (typeof obj !== 'object' || obj === null) {
@@ -331,6 +235,7 @@ export default function DataVisualization({ data, title, config, onConfigChange 
   }, [selectedArray, effectiveYKey]);
 
   const colorPalette = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#f59e0b'];
+  const tooltipStyle = { background: '#0f172a', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, fontSize: 12 };
 
   const ChartControls = () => (
     <div className="flex flex-wrap items-center gap-2">
@@ -386,7 +291,7 @@ export default function DataVisualization({ data, title, config, onConfigChange 
                 <Cell key={`cell-${idx}`} fill={colorPalette[idx % colorPalette.length]} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#cbd5e1' }} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
@@ -398,7 +303,7 @@ export default function DataVisualization({ data, title, config, onConfigChange 
         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
         <XAxis dataKey={effectiveXKey} tick={{ fill: '#94a3b8', fontSize: 12 }} />
         <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} />
-        <Tooltip />
+        <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#cbd5e1' }} />
         <Legend />
       </>
     );
@@ -458,162 +363,48 @@ export default function DataVisualization({ data, title, config, onConfigChange 
     );
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'formatted' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'formatted'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-        >
-          📋 Formatted
-        </button>
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'table' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'table'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-        >
-          📊 Table
-        </button>
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'chart' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'chart'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-        >
-          📈 Chart
-        </button>
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'metrics' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'metrics'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-        >
-          🧮 Metrics
-        </button>
+  const hasSeries = arrayCandidates.length > 0;
+  const tabs: Array<{ mode: VisualizationConfig['mode']; label: string }> = [
+    { mode: 'formatted', label: 'Overview' },
+    { mode: 'table', label: 'Table' },
+    ...(hasSeries ? [{ mode: 'chart' as const, label: 'Chart' }, { mode: 'metrics' as const, label: 'Stats' }] : []),
+    { mode: 'json', label: 'JSON' },
+  ];
+  const activeMode = tabs.some(t => t.mode === viewMode) ? viewMode : 'formatted';
 
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'ai_suggestions' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'ai_suggestions'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-        >
-          🤖 AI Suggestions
-        </button>
-        <button
-          onClick={() => setConfig({ ...localConfig, mode: 'json' })}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            viewMode === 'json'
-              ? 'bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
-              : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-600/50'
-          }`}
-        >
-          🔧 JSON
-        </button>
-        {viewMode === 'chart' && arrayCandidates.length > 0 && (
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="tablist" className="inline-flex rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
+          {tabs.map(t => (
+            <button
+              key={t.mode}
+              role="tab"
+              aria-selected={activeMode === t.mode}
+              onClick={() => setConfig({ ...localConfig, mode: t.mode })}
+              className={`rounded-md px-3 py-1 text-xs transition-colors ${
+                activeMode === t.mode ? 'bg-cyan-400/20 text-cyan-200' : 'text-white/55 hover:text-white/85'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {activeMode === 'chart' && hasSeries && (
           <div className="ml-auto">
             <ChartControls />
           </div>
         )}
       </div>
 
-      <div className="bg-gray-900/50 rounded-xl p-6 border border-gray-700/50 max-h-[28rem] overflow-auto">
-        {viewMode === 'formatted' && renderFormattedData(data)}
-        {viewMode === 'table' && renderTable(data)}
-        {viewMode === 'json' && (
-          <pre className="text-sm text-gray-300 whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre>
+      <div className="max-h-96 overflow-auto rounded-lg bg-black/20 p-3 text-sm sm:p-4">
+        {activeMode === 'formatted' && renderFormattedData(data)}
+        {activeMode === 'table' && renderTable(data)}
+        {activeMode === 'json' && (
+          <pre className="whitespace-pre-wrap text-xs text-gray-300">{JSON.stringify(data, null, 2)}</pre>
         )}
-        {viewMode === 'chart' && (
-          <div className="space-y-4">
-            {computedStats && (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center">
-                  <div className="text-[11px] text-white/60">Count</div>
-                  <div className="text-base font-semibold">{computedStats.count.toLocaleString()}</div>
-                </div>
-                <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center">
-                  <div className="text-[11px] text-white/60">Sum</div>
-                  <div className="text-base font-semibold">{Math.round(computedStats.sum * 100) / 100}</div>
-                </div>
-                <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center">
-                  <div className="text-[11px] text-white/60">Average</div>
-                  <div className="text-base font-semibold">{Math.round(computedStats.avg * 100) / 100}</div>
-                </div>
-                <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center">
-                  <div className="text-[11px] text-white/60">Min</div>
-                  <div className="text-base font-semibold">{computedStats.min}</div>
-                </div>
-                <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center">
-                  <div className="text-[11px] text-white/60">Max</div>
-                  <div className="text-base font-semibold">{computedStats.max}</div>
-                </div>
-              </div>
-            )}
-            {renderChart()}
-          </div>
-        )}
-        {viewMode === 'metrics' && renderMetrics()}
-
-        {viewMode === 'ai_suggestions' && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-xl">🤖</span>
-              <h3 className="text-lg font-semibold text-white">Smart Visualization Recommendations</h3>
-              <div className="ml-auto">
-                <span className="px-2 py-1 bg-green-600/20 text-green-400 text-xs rounded-full border border-green-500/30">
-                  ✨ AI-Powered
-                </span>
-              </div>
-            </div>
-            <p className="text-gray-400 text-sm mb-6">
-              Our AI has analyzed your specific data content and suggests these optimal visualization approaches:
-            </p>
-            <div className="grid gap-3">
-              {generateAISuggestions.map((suggestion) => (
-                <div
-                  key={suggestion.id}
-                  className="group rounded-xl border border-gray-600/50 bg-gray-800/30 hover:bg-gray-700/40 hover:border-cyan-500/50 transition-all duration-300 p-4 cursor-pointer"
-                  onClick={suggestion.action}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl flex-shrink-0">{suggestion.icon}</span>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-white group-hover:text-cyan-300 transition-colors">
-                        {suggestion.title}
-                      </h4>
-                      <p className="text-gray-400 text-sm mt-1">{suggestion.description}</p>
-
-                    </div>
-                    <div className="text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                      →
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {generateAISuggestions.length === 0 && (
-              <div className="text-center py-8 text-gray-400">
-                <p className="mb-2">🤔 No specific suggestions available</p>
-                <p className="text-sm">Try the other visualization modes to explore your data</p>
-              </div>
-            )}
-            <div className="text-xs text-gray-500 text-center mt-4 pt-4 border-t border-gray-700/50">
-              💡 Suggestions are dynamically generated based on your query results and data structure
-            </div>
-          </div>
-        )}
+        {activeMode === 'chart' && renderChart()}
+        {activeMode === 'metrics' && renderMetrics()}
       </div>
     </div>
   );

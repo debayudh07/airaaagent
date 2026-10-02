@@ -6,6 +6,7 @@ import uuid
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import json
+from typing import Awaitable, Callable
 
 import httpx
 
@@ -44,45 +45,52 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # DEFILLAMA_API_KEY = ""
 # NANSEN_API_KEY = ""
 
+# Per-tool wall-clock budget so one slow upstream API cannot stall a whole answer
+TOOL_TIMEOUT_SECONDS = float(os.getenv("TOOL_TIMEOUT_SECONDS", "40"))
+PLANNER_TIMEOUT_SECONDS = float(os.getenv("PLANNER_TIMEOUT_SECONDS", "12"))
+
+# Progress callback used by the streaming API: receives small JSON-able dicts
+EventCallback = Optional[Callable[[Dict[str, Any]], Awaitable[None]]]
+
+TOOL_CATALOG: Dict[str, str] = {
+    "coinmarketcap_tool": "Prices, market cap, rank, supply and metadata for specific coins/tokens",
+    "defillama_tool": "DeFi TVL by protocol/chain, yields/APY, stablecoins, DEX volume, fees/revenue, bridges",
+    "dune_analytics_tool": "On-chain DEX pair/volume analytics from Dune",
+    "etherscan_tool": "Ethereum wallet balance, transactions and token transfers (REQUIRES a wallet address)",
+}
+
 # =============================
 # Greeting Detection & Responses
 # =============================
+_GREETING_PHRASES = [
+    "hi", "hello", "hey", "hiya", "howdy", "greetings",
+    "good morning", "good afternoon", "good evening", "good day",
+    "what's up", "whats up", "how are you", "how're you", "how are you doing",
+    "how's it going", "hows it going", "how's everything", "hows everything",
+    "nice to meet you", "pleasure to meet you", "thanks", "thank you",
+    "bye", "goodbye", "see you", "catch you later", "take care",
+    "how do you do", "sup", "yo", "cheers",
+]
+
+_TASK_HINTS = (
+    "price", "tvl", "apy", "yield", "volume", "market", "analy", "compare", "token",
+    "coin", "defi", "wallet", "address", "0x", "gas", "chain", "stablecoin", "bridge",
+    "fees", "swap", "dex", "whale", "invest", "btc", "eth", "sol", "bitcoin", "ethereum",
+)
+
+
 def detect_greeting(query: str) -> bool:
-    """Detect if the query is a greeting or casual conversation"""
-    query_lower = query.lower().strip()
-    
-    # Common greetings and casual conversation starters
-    greetings = [
-        "hi", "hello", "hey", "hiya", "howdy", "greetings",
-        "good morning", "good afternoon", "good evening", "good day",
-        "what's up", "whats up", "how are you", "how're you", "how are you doing",
-        "how's it going", "hows it going", "how's everything", "hows everything",
-        "nice to meet you", "pleasure to meet you", "thanks", "thank you",
-        "bye", "goodbye", "see you", "catch you later", "take care",
-        "how do you do", "sup", "yo", "cheers"
-    ]
-    
-    # Check for exact matches or if query starts with greeting
-    for greeting in greetings:
-        if query_lower == greeting or query_lower.startswith(greeting + " ") or query_lower.startswith(greeting + ","):
-            return True
-    
-    # Check for greeting patterns
-    greeting_patterns = [
-        r"\b(hi|hello|hey)\b.*",
-        r"good\s+(morning|afternoon|evening|day)",
-        r"how\s+(are|is)\s+you",
-        r"what['']?s\s+up",
-        r"nice\s+to\s+meet\s+you",
-        r"thanks?\s+(you)?",
-        r"thank\s+you"
-    ]
-    
-    for pattern in greeting_patterns:
-        if re.match(pattern, query_lower):
-            return True
-    
-    return False
+    """True only for short, pure small talk. A greeting followed by a real
+    question ("hey, what's the BTC price?") must go through the research path."""
+    cleaned = re.sub(r"[^\w\s'’]", " ", (query or "").lower()).strip()
+    if not cleaned or len(cleaned.split()) > 6:
+        return False
+    if any(hint in cleaned for hint in _TASK_HINTS):
+        return False
+    return any(
+        cleaned == g or cleaned.startswith(g + " ")
+        for g in _GREETING_PHRASES
+    )
 
 def get_greeting_response(query: str, session_context: Dict[str, Any] = None) -> str:
     """Generate appropriate AI greeting responses"""
@@ -675,35 +683,7 @@ async def dune_analytics_tool(query: str, address: str = None, time_range: str =
         
         # Enhanced general analytics for Bitcoin/crypto analysis
         elif any(keyword in query.lower() for keyword in ["bitcoin", "btc", "analysis", "investment", "performance"]):
-            # Provide comprehensive Bitcoin analytics data
-            mock_bitcoin_analytics = [
-                {
-                    "metric": "network_activity",
-                    "active_addresses_7d": 985000,
-                    "transaction_count_7d": 2100000,
-                    "avg_transaction_value": 15750.50,
-                    "hash_rate_exahash": 450.2,
-                    "difficulty": 55620000000000,
-                    "mempool_size": 125000
-                },
-                {
-                    "metric": "market_indicators",
-                    "fear_greed_index": 72,
-                    "social_sentiment": "bullish",
-                    "whale_activity": "high",
-                    "exchange_inflows_7d": 85000000,
-                    "exchange_outflows_7d": 125000000,
-                    "net_flow": 40000000
-                },
-                {
-                    "metric": "defi_integration",
-                    "wrapped_btc_supply": 285000,
-                    "lightning_network_capacity": 5200,
-                    "institutional_holdings": 1250000,
-                    "etf_holdings": 875000
-                }
-            ]
-            
+            # No real Bitcoin analytics query is wired up for Dune; report that honestly.
             return {"success": False, "error": "No analytics available"}
         else:
             # Original Dune Analytics query execution logic
@@ -732,22 +712,7 @@ async def dune_analytics_tool(query: str, address: str = None, time_range: str =
                 json={"query_parameters": params}
             )
             if response.status_code != 200:
-                # Provide fallback data when Dune API is not available
-                fallback_data = {
-                    "dex_volume_24h": 2.5e9,
-                    "total_transactions": 125000,
-                    "unique_users": 45000,
-                    "gas_usage": 15.2e6,
-                    "top_tokens": ["USDC", "WETH", "USDT", "DAI"],
-                    "chain": "ethereum",
-                    "timestamp": datetime.now().isoformat()
-                }
-                return {
-                    "success": True, 
-                    "data": fallback_data, 
-                    "source": "dune_analytics",
-                    "note": "Using fallback data due to API limitations"
-                }
+                return {"success": False, "error": f"Dune API HTTP {response.status_code}", "source": "dune_analytics"}
             
             exec_data = response.json()
             execution_id = exec_data.get("execution_id")
@@ -816,27 +781,6 @@ async def etherscan_tool(query: str, address: str = None) -> Dict[str, Any]:
         response = await safe_http_request('GET', MCPConfig.BASE_URLS["etherscan"], params=params)
         if response.status_code == 200:
             data = response.json()
-            
-            # Enhance data with mock network health metrics for comprehensive analysis
-            if "network" in query.lower() or "analysis" in query.lower() or "health" in query.lower():
-                enhanced_data = {
-                    "etherscan_data": data,
-                    "network_metrics": {
-                        "avg_block_time": 12.05,
-                        "pending_transactions": 125000,
-                        "gas_price_gwei": 25.5,
-                        "network_utilization": 0.78,
-                        "active_addresses_24h": 485000,
-                        "transaction_throughput_tps": 15.2,
-                        "validator_count": 520000,
-                        "staking_ratio": 0.22
-                    },
-                    "analysis_context": {
-                        "address_type": "ethereum_foundation" if address == "0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe" else "user_address",
-                        "data_purpose": "network_health_analysis"
-                    }
-                }
-                return {"success": True, "data": enhanced_data, "source": "etherscan"}
             
             return {"success": True, "data": data, "source": "etherscan"}
         else:
@@ -2335,7 +2279,7 @@ USER QUERY ADAPTATION:
         
         # Add formatting enhancements based on query type
         if query_intent == "analysis":
-            formatted_result = f"� **COMPREHENSIVE ANALYSIS** {data_quality_emoji}\n\n{result}"
+            formatted_result = f"📊 **COMPREHENSIVE ANALYSIS** {data_quality_emoji}\n\n{result}"
             
         elif query_intent == "information":
             formatted_result = f"ℹ️ **CRYPTOCURRENCY INFORMATION** {data_quality_emoji}\n\n{result}"
@@ -2367,9 +2311,20 @@ USER QUERY ADAPTATION:
         
         return formatted_result
 
-    async def research(self, request: ResearchRequest) -> Dict[str, Any]:
+    @staticmethod
+    async def _emit(on_event: EventCallback, event: Dict[str, Any]) -> None:
+        """Fire a progress event; a broken listener must never break research."""
+        if on_event is None:
+            return
+        try:
+            await on_event(event)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(f"Event listener failed: {exc}")
+
+    async def research(self, request: ResearchRequest, on_event: EventCallback = None) -> Dict[str, Any]:
         """Execute research using optimized chain with intelligent formatting"""
         start_time = datetime.now()
+        tool_trace: List[Dict[str, Any]] = []
         reasoning_steps = []
         citations = []
         data_sources_used = []
@@ -2490,11 +2445,27 @@ USER QUERY ADAPTATION:
             reasoning_steps.append(f"Analyzing query and planning approach (Intent: {query_intent})")
             
             # Execute research plan
+            await self._emit(on_event, {"type": "status", "stage": "planning", "message": "Planning which data sources to query"})
             research_plan = await self._plan_research(request)
             reasoning_steps.extend(research_plan["steps"])
+            await self._emit(on_event, {
+                "type": "plan",
+                "tools": research_plan["tools"],
+                "rationale": research_plan.get("rationale", ""),
+                "planner": research_plan.get("planner", "heuristic"),
+            })
             
             # Execute tool calls in parallel where possible
-            tool_results = await self._execute_parallel_tools(request, research_plan["tools"])
+            tool_results = await self._execute_parallel_tools(request, research_plan["tools"], on_event)
+            tool_trace = [
+                {
+                    "tool": r.get("tool"),
+                    "success": bool(r.get("success")),
+                    "duration_ms": r.get("duration_ms"),
+                    "error": r.get("error") if not r.get("success") else None,
+                }
+                for r in tool_results if isinstance(r, dict)
+            ]
             # Guard against any non-dict tool results
             tool_results = [r for r in tool_results if isinstance(r, dict)]
             data_sources_used = [r.get("source", "unknown") for r in tool_results if isinstance(r, dict) and r.get("success")]
@@ -2519,7 +2490,13 @@ USER QUERY ADAPTATION:
                 "synthesis_context": synthesis_prompt
             }
             
-            raw_result = await self.research_chain.ainvoke(enhanced_context)
+            await self._emit(on_event, {"type": "status", "stage": "synthesizing", "message": "Writing the analysis"})
+            chunks: List[str] = []
+            async for chunk in self.research_chain.astream(enhanced_context):
+                if chunk:
+                    chunks.append(chunk)
+                    await self._emit(on_event, {"type": "token", "text": chunk})
+            raw_result = "".join(chunks)
             
             # Apply intelligent formatting based on query intent and data quality
             final_result = self._format_final_result(raw_result, query_intent, merged_data)
@@ -2572,6 +2549,8 @@ USER QUERY ADAPTATION:
                 "query_intent": query_intent,
                 "merged_data": merged_data,  # Include merged data in results
                 "data_quality_score": merged_data.get("metadata", {}).get("completeness_score", 0),
+                "tool_trace": tool_trace,
+                "planner": research_plan.get("planner", "heuristic"),
                 "tool_results": tool_results  # For debugging
             }
             
@@ -2586,131 +2565,134 @@ USER QUERY ADAPTATION:
                 "citations": citations,
                 "data_sources_used": data_sources_used,
                 "execution_time": execution_time,
-                "query_intent": query_intent
+                "query_intent": query_intent,
+                "tool_trace": tool_trace,
             }
     
     async def _plan_research(self, request: ResearchRequest) -> Dict[str, Any]:
-        """Plan which tools to use based on the query - Enhanced for maximum tool usage"""
-        query_lower = request.query.lower()
-        tools_to_use = []
-        steps = ["Query analysis completed"]
-        
-        # Enhanced tool selection for comprehensive data gathering
-        # Always use CoinMarketCap for any crypto-related query
-        tools_to_use.append("coinmarketcap_tool")
-        steps.append("Selected CoinMarketCap for market data and price analysis")
-        
-        # Use Dune Analytics for comprehensive blockchain analytics
-        if any(keyword in query_lower for keyword in ["bitcoin", "btc", "ethereum", "eth", "analysis", "investment", "trading", "volume", "dex", "swap", "whale", "performance", "trend"]):
-            tools_to_use.append("dune_analytics_tool")
-            steps.append("Selected Dune Analytics for blockchain metrics and trading data")
-        
-        # Use DefiLlama for TVL/yields/stablecoins when relevant
-        if any(keyword in query_lower for keyword in [
-            "tvl", "protocol", "defi", "stablecoin", "apy", "yield", "fees", "revenue", "bridge"
-        ]):
-            tools_to_use.append("defillama_tool")
-            steps.append("Selected DefiLlama for TVL, yields, stablecoins, fees, bridges, prices")
+        """Pick tools with the LLM; fall back to keyword rules if it fails or times out."""
+        try:
+            plan = await asyncio.wait_for(self._llm_plan(request), timeout=PLANNER_TIMEOUT_SECONDS)
+            if plan and plan["tools"]:
+                return plan
+        except Exception as exc:
+            logger.warning(f"LLM planner unavailable, using heuristic planner: {exc}")
+        return self._heuristic_plan(request)
 
-        # Use Etherscan for on-chain data when analyzing major cryptocurrencies
-        if any(keyword in query_lower for keyword in ["bitcoin", "btc", "ethereum", "eth", "analysis", "investment", "transaction", "network", "activity"]) or request.address:
-            # For comprehensive analysis, we'll use a sample Ethereum address to get transaction data
-            if not request.address and any(keyword in query_lower for keyword in ["bitcoin", "btc", "ethereum", "eth", "analysis", "investment"]):
-                # Use a well-known address for demonstration (Ethereum Foundation)
-                request.address = "0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe"
-                steps.append("Using sample Ethereum address for on-chain analysis demonstration")
-            
-            if request.address:
-                tools_to_use.append("etherscan_tool")
-                steps.append("Selected Etherscan for on-chain transaction analysis")
-        
-        # For investment/analysis queries, ensure we use multiple tools for comprehensive data
-        if any(keyword in query_lower for keyword in ["invest", "investment", "analysis", "should i", "good idea", "recommend"]):
-            # Ensure all available tools are used for maximum data completeness
-            if "dune_analytics_tool" not in tools_to_use:
-                tools_to_use.append("dune_analytics_tool")
-                steps.append("Added Dune Analytics for comprehensive investment analysis")
-            
-            if "defillama_tool" not in tools_to_use:
-                tools_to_use.append("defillama_tool")
-                steps.append("Added DefiLlama for protocol TVL and yields context")
+    async def _llm_plan(self, request: ResearchRequest) -> Optional[Dict[str, Any]]:
+        """Ask the model which tools are actually needed for this query."""
+        catalog = "\n".join(f"- {name}: {desc}" for name, desc in TOOL_CATALOG.items())
+        history = session_manager.get_conversation_summary(self.session_id) or "(none)"
+        prompt = f"""You are the planning step of a Web3 research agent. Choose the MINIMAL set of tools needed to answer the user's question with real data. Do not call tools whose data the question does not need.
 
-            # Use Etherscan with a sample address if not already included
-            if "etherscan_tool" not in tools_to_use:
-                if not request.address:
-                    request.address = "0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe"  # Ethereum Foundation
-                tools_to_use.append("etherscan_tool")
-                steps.append("Added Etherscan for blockchain network health analysis")
-        
-        # Ensure we have at least 2 tools for higher data completeness
-        if len(tools_to_use) < 2:
-            if "dune_analytics_tool" not in tools_to_use:
-                tools_to_use.append("dune_analytics_tool")
-                steps.append("Added Dune Analytics for comprehensive data coverage")
-            if "defillama_tool" not in tools_to_use:
-                tools_to_use.append("defillama_tool")
-                steps.append("Added DefiLlama for broader DeFi coverage")
-        
-        steps.append(f"Final tool selection: {len(tools_to_use)} tools for maximum data completeness")
-        
-        return {"tools": tools_to_use, "steps": steps}
-    
-    async def _execute_parallel_tools(self, request: ResearchRequest, tool_names: List[str]) -> List[Dict]:
-        """Execute multiple tools in parallel for efficiency"""
-        tasks = []
-        
+Tools:
+{catalog}
+
+Wallet address provided by user: {request.address or 'none'}
+Recent conversation:
+{history}
+
+Question: {request.query}
+
+Reply with ONLY JSON: {{"tools": ["tool_name", ...], "rationale": "one short sentence"}}"""
+        raw = await self.llm.ainvoke(prompt)
+        text = raw.content if hasattr(raw, "content") else str(raw)
+        match = re.search(r"\{.*\}", text if isinstance(text, str) else str(text), re.DOTALL)
+        if not match:
+            return None
+        parsed = json.loads(match.group(0))
+        tools = [t for t in parsed.get("tools", []) if t in TOOL_CATALOG]
+        # Etherscan cannot run without an address; drop it rather than guess one.
+        if "etherscan_tool" in tools and not request.address:
+            tools.remove("etherscan_tool")
+        tools = list(dict.fromkeys(tools))
+        if not tools:
+            return None
+        rationale = str(parsed.get("rationale", "")).strip()
+        steps = ["Query analysis completed (LLM planner)"]
+        steps += [f"Selected {t} - {TOOL_CATALOG[t].split(' (')[0]}" for t in tools]
+        if rationale:
+            steps.append(f"Plan rationale: {rationale}")
+        return {"tools": tools, "steps": steps, "rationale": rationale, "planner": "llm"}
+
+    def _heuristic_plan(self, request: ResearchRequest) -> Dict[str, Any]:
+        """Keyword-based fallback planner. Never invents a wallet address."""
+        q = request.query.lower()
+        tools: List[str] = ["coinmarketcap_tool"]
+        steps = ["Query analysis completed (keyword planner)", "Selected CoinMarketCap for market data"]
+
+        def add(name: str, why: str) -> None:
+            if name not in tools:
+                tools.append(name)
+                steps.append(why)
+
+        if any(k in q for k in ["bitcoin", "btc", "ethereum", "eth", "analysis", "investment", "trading",
+                                "volume", "dex", "swap", "whale", "performance", "trend"]):
+            add("dune_analytics_tool", "Selected Dune Analytics for blockchain metrics and trading data")
+        if any(k in q for k in ["tvl", "protocol", "defi", "stablecoin", "apy", "yield", "fees", "revenue", "bridge"]):
+            add("defillama_tool", "Selected DefiLlama for TVL, yields, stablecoins, fees, bridges")
+        if request.address:
+            add("etherscan_tool", "Selected Etherscan for on-chain wallet analysis")
+        if any(k in q for k in ["invest", "investment", "analysis", "should i", "good idea", "recommend"]):
+            add("dune_analytics_tool", "Added Dune Analytics for investment context")
+            add("defillama_tool", "Added DefiLlama for DeFi context")
+        if len(tools) < 2:
+            add("defillama_tool", "Added DefiLlama for broader DeFi coverage")
+
+        steps.append(f"Final tool selection: {', '.join(tools)}")
+        return {"tools": tools, "steps": steps, "rationale": "", "planner": "heuristic"}
+
+    async def _run_tool(self, name: str, coro, on_event: EventCallback) -> Dict[str, Any]:
+        """Run one tool with a timeout, timing it and reporting progress."""
+        started = datetime.now()
+        await self._emit(on_event, {"type": "tool_start", "tool": name})
+        try:
+            result = await asyncio.wait_for(coro, timeout=TOOL_TIMEOUT_SECONDS)
+            if not isinstance(result, dict):
+                result = {"success": False, "error": "Tool returned an unexpected payload"}
+        except asyncio.TimeoutError:
+            result = {"success": False, "error": f"Timed out after {TOOL_TIMEOUT_SECONDS:.0f}s"}
+        except Exception as exc:
+            logger.error(f"Tool {name} raised: {exc}")
+            result = {"success": False, "error": str(exc)}
+        duration_ms = int((datetime.now() - started).total_seconds() * 1000)
+        result.setdefault("source", name.replace("_tool", ""))
+        result["tool"] = name
+        result["duration_ms"] = duration_ms
+        await self._emit(on_event, {
+            "type": "tool_end",
+            "tool": name,
+            "success": bool(result.get("success")),
+            "duration_ms": duration_ms,
+            "error": None if result.get("success") else result.get("error"),
+        })
+        return result
+
+    async def _execute_parallel_tools(self, request: ResearchRequest, tool_names: List[str],
+                                      on_event: EventCallback = None) -> List[Dict]:
+        """Execute the planned tools concurrently, each with its own timeout and trace."""
         logger.info(f"Executing tools: {tool_names}")
-        
+        runners = []
         for tool_name in tool_names:
             if tool_name == "dune_analytics_tool":
-                logger.info(f"Preparing Dune Analytics query: {request.query}")
-                task = dune_analytics_tool.ainvoke({
-                    "query": request.query,
-                    "address": request.address,
-                    "time_range": request.time_range
+                coro = dune_analytics_tool.ainvoke({
+                    "query": request.query, "address": request.address, "time_range": request.time_range,
                 })
             elif tool_name == "etherscan_tool":
-                if request.address:
-                    logger.info(f"Preparing Etherscan query for address: {request.address}")
-                    task = etherscan_tool.ainvoke({
-                        "query": request.query,
-                        "address": request.address
-                    })
-                else:
-                    logger.warning("Etherscan tool selected but no address provided, skipping")
+                if not request.address:
+                    logger.warning("Etherscan selected but no address provided, skipping")
                     continue
+                coro = etherscan_tool.ainvoke({"query": request.query, "address": request.address})
             elif tool_name == "defillama_tool":
-                task = defillama_tool.ainvoke({"query": request.query})
+                coro = defillama_tool.ainvoke({"query": request.query})
             elif tool_name == "coinmarketcap_tool":
-                logger.info(f"Preparing CoinMarketCap query: {request.query}")
-                task = coinmarketcap_tool.ainvoke({"query": request.query})
+                coro = coinmarketcap_tool.ainvoke({"query": request.query})
             else:
                 logger.warning(f"Unknown tool: {tool_name}")
                 continue
-            
-            tasks.append(task)
-        
-        # Execute all tasks in parallel
-        if tasks:
-            logger.info(f"Executing {len(tasks)} tasks in parallel")
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results and log outcomes
-            valid_results = []
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"Tool {i+1} failed with exception: {result}")
-                else:
-                    if isinstance(result, dict):
-                        if result.get("success"):
-                            logger.info(f"Tool {i+1} succeeded: {result.get('source', 'unknown')}")
-                        else:
-                            logger.warning(f"Tool {i+1} failed: {result.get('error', 'unknown error')}")
-                        valid_results.append(result)
-            
-            return valid_results
-        
-        return []
+            runners.append(self._run_tool(tool_name, coro, on_event))
+
+        return list(await asyncio.gather(*runners)) if runners else []
     
     def _create_synthesis_prompt(self, request: ResearchRequest, tool_results: List[Dict], merged_data: Dict = None) -> str:
         """Create context for final synthesis with query intent analysis and merged data"""

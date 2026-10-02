@@ -1,9 +1,12 @@
 import os
+import json
+import queue
+import threading
 import asyncio
 from typing import Optional
 from datetime import datetime, timedelta
 
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, Response, request, jsonify, make_response, stream_with_context
 from flask_cors import CORS
 
 # Import agent components
@@ -122,6 +125,63 @@ def create_app() -> Flask:
     @app.route("/api/research", methods=["OPTIONS"])
     def research_preflight():
         return make_response("", 200)
+
+    @app.route("/api/research/stream", methods=["POST"])
+    def research_stream_route():
+        """Server-Sent Events: live plan / tool progress / answer tokens, then the final result."""
+        payload = request.get_json(force=True, silent=True) or {}
+        query = payload.get("query", "")
+        if not query or not isinstance(query, str):
+            return jsonify({"success": False, "error": "Field 'query' (string) is required"}), 400
+
+        address: Optional[str] = payload.get("address")
+        time_range: str = payload.get("time_range", "7d")
+        session_id: Optional[str] = payload.get("session_id")
+
+        events: "queue.Queue[Optional[dict]]" = queue.Queue()
+
+        async def on_event(event: dict) -> None:
+            events.put(event)
+
+        def worker() -> None:
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                agent = OptimizedWeb3ResearchAgent(session_id=session_id)
+                req = ResearchRequest(query=query, address=address, time_range=time_range, session_id=session_id)
+                result = loop.run_until_complete(agent.research(req, on_event=on_event))
+                result["session_id"] = agent.session_id
+                events.put({"type": "result", "result": result})
+            except Exception as exc:
+                events.put({"type": "error", "error": str(exc)})
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+                events.put(None)  # sentinel
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def sse():
+            while True:
+                try:
+                    event = events.get(timeout=15)
+                except queue.Empty:
+                    yield ": keep-alive\n\n"  # keeps proxies from closing an idle stream
+                    continue
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+
+        return Response(
+            stream_with_context(sse()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.route("/api/research/stream", methods=["OPTIONS"])
+    def research_stream_preflight():
+        return make_response("", 200)
+
 
     @app.route("/api/conversation/<session_id>", methods=["GET"])
     def get_conversation(session_id: str):
