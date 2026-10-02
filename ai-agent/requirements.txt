@@ -8,6 +8,10 @@ httpx>=0.27,<1
 python-dotenv>=1.0
 pydantic>=2.7,<3
 
+# Web search (DuckDuckGo, free, no key)
+ddgs>=9.0,<10
+
 # LLM (Gemini 3.x via the consolidated Google GenAI SDK)
+google-genai>=2.0,<3
 langchain-core>=1.6.1,<2
 langchain-google-genai>=4.4,<5

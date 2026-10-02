@@ -17,6 +17,7 @@ from ..config import Settings, get_settings
 from ..memory import SessionManager
 from ..schemas import Entities, FollowUp, Intent, Plan, ResearchRequest
 from ..tools import TOOL_CATALOG
+from ..tools.web import extract_urls
 from ..utils.assets import KNOWN_PROTOCOLS, extract_chain, extract_symbols
 from .intent import classify_intent
 from .llm import planner_llm
@@ -29,6 +30,14 @@ _DEX_WORDS = ("dex", "whale", "swap", "liquidity", "trading pair", "trading volu
 _WALLET_WORDS = ("wallet", "balance", "transactions", "my address", "my wallet", "transfers", "address")
 _MARKET_WORDS = ("price", "market cap", "marketcap", "worth", "volume", "rank", "supply", "performance", "performing")
 _SHORT_FOLLOWUP = re.compile(r"^\s*(and|what about|how about|also)\b", re.I)
+_HISTORY_WORDS = ("chart", "graph", "plot", "history", "historical", "trend", "over time", "since", "performed", "performance")
+_SENTIMENT_WORDS = ("trending", "sentiment", "fear", "greed", "mood")
+_NEWS_WORDS = ("news", "headline", "announce", "happening", "why did", "why is", "why has", "hack", "exploit",
+               "regulation", "lawsuit", "sec ", "etf", "this week", "today")
+_WEB_WORDS = ("roadmap", "upgrade", "launch", "airdrop", "who founded", "who is", "when will", "when is",
+              "tokenomics", "partnership", "testnet", "mainnet", "explain", "search", "look up", "google")
+_TOKEN_WORDS = ("memecoin", "meme coin", "new token", "token address", "contract address", "launched token", "pump")
+_ADDRESS = re.compile(r"0x[a-fA-F0-9]{40}")
 
 
 def _catalog_text() -> str:
@@ -80,14 +89,21 @@ class Planner:
         plan.tools = tools
         plan.entities.symbols = list(dict.fromkeys(s.upper() for s in plan.entities.symbols))[:10]
         plan.entities.protocols = list(dict.fromkeys(p.lower() for p in plan.entities.protocols))[:4]
+        plan.entities.urls = list(dict.fromkeys([*plan.entities.urls, *extract_urls(request.query)]))[:5]
+        if "read_url_tool" in tools and not plan.entities.urls:
+            tools.remove("read_url_tool")  # nothing to read
+        if plan.entities.days is not None:
+            plan.entities.days = max(1, min(int(plan.entities.days), 365))
         return plan
 
     def heuristic_plan(self, request: ResearchRequest) -> Plan:
+        """Keyword rules, used when the LLM planner is unavailable (e.g. rate limited)."""
         q = request.query.lower()
         symbols = extract_symbols(q)
         protocols = [p for p in KNOWN_PROTOCOLS if re.search(rf"\b{re.escape(p)}\b", q)]
         chain = extract_chain(q)
         intent = classify_intent(q)
+        urls = extract_urls(request.query)
 
         # A bare follow-up ("and SOL?") inherits the previous question's context.
         if _SHORT_FOLLOWUP.match(q) and request.session_id:
@@ -97,24 +113,40 @@ class Planner:
                 symbols = extract_symbols(last)
                 protocols = [p for p in KNOWN_PROTOCOLS if re.search(rf"\b{re.escape(p)}\b", last.lower())]
 
-        defi = any(w in q for w in _DEFI_WORDS) or bool(protocols)
+        has = lambda words: any(w in q for w in words)  # noqa: E731
+        defi = has(_DEFI_WORDS) or bool(protocols)
+        history = has(_HISTORY_WORDS)
+        news = has(_NEWS_WORDS)
+        web = has(_WEB_WORDS)
+        token_lookup = has(_TOKEN_WORDS) or (bool(_ADDRESS.search(request.query)) and not has(_WALLET_WORDS))
+        market = has(_MARKET_WORDS)
+
         tools: List[str] = []
-        # A DeFi question names chains and protocol tokens ("aave on ethereum"); that alone is not a market-data request.
-        if not defi or (symbols and any(w in q for w in _MARKET_WORDS)):
+        if urls:
+            tools.append("read_url_tool")
+        if history or has(_SENTIMENT_WORDS):
+            tools.append("coingecko_tool")  # history for charts, trending, Fear & Greed
+        elif symbols and (market or not (defi or news or web)) or not (defi or news or web or urls or token_lookup):
             tools.append("coinmarketcap_tool")
         if defi:
             tools.append("defillama_tool")
-        if any(w in q for w in _DEX_WORDS):
+        if has(_DEX_WORDS):
             tools.append("dune_analytics_tool")
-        if request.address and any(w in q for w in _WALLET_WORDS):
+        if token_lookup:
+            tools.append("dexscreener_tool")
+        if request.address and has(_WALLET_WORDS):
             tools.append("etherscan_tool")
-        if intent in ("analysis", "comparison") and "defillama_tool" not in tools and symbols:
-            tools.append("defillama_tool")  # broader DeFi context for investment-style questions
+        if news:
+            tools.append("news_tool")
+        if web and not urls:
+            tools.append("web_search_tool")
+        if intent in ("analysis", "comparison") and symbols and "coingecko_tool" not in tools:
+            tools.append("coingecko_tool")  # 30-day history gives the analysis (and a chart) context
 
         return Plan(
             intent=intent if intent in get_args(Intent) else "general",
-            tools=tools,
-            entities=Entities(symbols=[s for s in symbols], protocols=protocols, chain=chain),
+            tools=list(dict.fromkeys(tools)),
+            entities=Entities(symbols=symbols, protocols=protocols, chain=chain, urls=urls),
             rationale="Chosen from keywords in the question.",
         )
 
