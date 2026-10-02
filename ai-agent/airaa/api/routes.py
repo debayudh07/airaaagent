@@ -56,6 +56,16 @@ def register_routes(app: Flask, settings: Settings, agent_factory: Callable[[Opt
     def tools():
         return jsonify({"success": True, "tools": [{"name": n, "description": d} for n, d in TOOL_CATALOG.items()]})
 
+    @app.get("/api/feed")
+    def feed():
+        """Live snapshot for the home board (cached server-side; see airaa.feed)."""
+        from ..feed import get_feed
+
+        snapshot = get_feed()
+        response = jsonify({"success": bool(snapshot["sections"]), **snapshot})
+        response.headers["Cache-Control"] = "public, max-age=60"
+        return response
+
     # ------------------------------------------------------------------ research
     @app.post("/api/research")
     def research():
