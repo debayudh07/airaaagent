@@ -8,7 +8,8 @@ import { FileDown, FileSpreadsheet, FileText, Clock, Copy, Check, Square, ArrowU
 import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
 import Markdown from '../components/Markdown';
 import { LiveActivity, ActivitySummary } from '../components/AgentActivity';
-import { API_BASE, streamResearch, type AgentEvent, type ToolProgress } from '../../lib/api';
+import { API_BASE, streamResearch, type AgentEvent, type ChartSpec, type ToolProgress } from '../../lib/api';
+import AgentCharts from '../components/AgentCharts';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
@@ -39,13 +40,14 @@ interface ResearchResult {
   tool_results?: any[];
   tool_trace?: Array<{ tool: string; success: boolean; duration_ms?: number; error?: string | null }>;
   planner?: string;
+  charts?: ChartSpec[];
 }
 
 const SUGGESTIONS = [
-  'How is Ethereum performing this week?',
-  'Compare Bitcoin vs Solana',
+  'Chart ETH vs SOL over the last 30 days',
+  'Why is the crypto market moving today?',
   'Best stablecoin yields right now',
-  'TVL trend on Arbitrum and top protocols',
+  'Aave TVL history and fees',
 ];
 
 interface LiveRun {
@@ -54,6 +56,7 @@ interface LiveRun {
   rationale?: string;
   tools: ToolProgress[];
   draft: string;
+  charts: ChartSpec[];
 }
 
 interface ApiStats {
@@ -322,7 +325,7 @@ export default function MainChat() {
     setQuery('');
 
     setLoading(true);
-    setLive({ stage: 'Starting…', tools: [], draft: '' });
+    setLive({ stage: 'Starting…', tools: [], draft: '', charts: [] });
     const startTime = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -351,6 +354,14 @@ export default function MainChat() {
               ? { tool: t.tool, status: event.success ? 'done' as const : 'failed' as const, duration_ms: event.duration_ms, error: event.error }
               : t),
           });
+          break;
+        case 'chart':
+          setLive(prev => prev && { ...prev, charts: [...prev.charts, event.chart] });
+          break;
+        case 'tool_start':
+          setLive(prev => prev && (prev.tools.some(t => t.tool === event.tool)
+            ? prev
+            : { ...prev, tools: [...prev.tools, { tool: event.tool, status: 'running' as const }] }));
           break;
         case 'token':
           setLive(prev => prev && { ...prev, draft: prev.draft + event.text });
@@ -789,6 +800,8 @@ export default function MainChat() {
                           <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-red-400/30 bg-red-900/10 p-3 text-xs text-red-300">{res.error}</pre>
                         )}
 
+                        {res.success && <AgentCharts charts={res.charts} />}
+
                         {res.success && (
                           <ActivitySummary
                             trace={res.tool_trace}
@@ -872,6 +885,7 @@ export default function MainChat() {
               <div className="flex justify-start">
                 <div className="w-full space-y-3">
                   <LiveActivity stage={live.stage} planner={live.planner} rationale={live.rationale} tools={live.tools} />
+                  <AgentCharts charts={live.charts} />
                   {live.draft && <Markdown>{live.draft}</Markdown>}
                 </div>
               </div>

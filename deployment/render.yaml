@@ -4,7 +4,7 @@ services:
     env: python
     rootDir: ai-agent
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 180
+    startCommand: gunicorn -c gunicorn.conf.py app:app
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:

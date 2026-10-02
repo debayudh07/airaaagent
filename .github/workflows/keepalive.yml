@@ -1,0 +1,18 @@
+# Alternative to deployment/keepalive-worker: keeps the free Render backend from sleeping.
+# GitHub may delay scheduled runs, and private repos spend Actions minutes (~4,300 min/month here).
+name: keep backend warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping health endpoint
+        env:
+          URL: ${{ vars.BACKEND_HEALTH_URL || 'https://airaaagent.onrender.com/api/health' }}
+        run: curl --fail --silent --show-error --max-time 90 "$URL"

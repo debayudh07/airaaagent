@@ -11,6 +11,17 @@ export interface ToolProgress {
   error?: string | null;
 }
 
+export interface ChartSpec {
+  id: string;
+  kind: 'line' | 'area' | 'bar';
+  title: string;
+  subtitle?: string;
+  x_key: string;
+  series: Array<{ key: string; label: string }>;
+  data: Array<Record<string, string | number | null>>;
+  y_format: 'usd' | 'percent' | 'number';
+}
+
 export type AgentEvent =
   | { type: 'status'; stage: string; message: string }
   | { type: 'plan'; tools: string[]; rationale?: string; planner?: string }
@@ -18,15 +29,21 @@ export type AgentEvent =
   | { type: 'tool_retry'; tool: string; error?: string | null }
   | { type: 'followup'; tools: string[]; reason?: string }
   | { type: 'tool_end'; tool: string; success: boolean; duration_ms: number; error?: string | null }
+  | { type: 'chart'; chart: ChartSpec }
   | { type: 'token'; text: string }
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: string };
 
 export const TOOL_LABELS: Record<string, string> = {
   coinmarketcap_tool: 'CoinMarketCap',
+  coingecko_tool: 'CoinGecko',
   defillama_tool: 'DefiLlama',
   dune_analytics_tool: 'Dune Analytics',
   etherscan_tool: 'Etherscan',
+  dexscreener_tool: 'DEX Screener',
+  news_tool: 'News',
+  web_search_tool: 'Web search',
+  read_url_tool: 'Reading pages',
 };
 
 export const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;

@@ -1,0 +1,10 @@
+name = "airaa-keepalive"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Every 10 minutes: Render's free tier sleeps after 15 idle minutes.
+[triggers]
+crons = ["*/10 * * * *"]
+
+[vars]
+TARGET_URLS = "https://airaaagent.onrender.com/api/health"
