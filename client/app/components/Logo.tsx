@@ -1,18 +1,28 @@
 import Link from 'next/link';
 
-/** AIRAA mark plus wordmark; links home. */
-export default function Logo({ size = 'md' }: { size?: 'md' | 'lg' }) {
-  const box = size === 'lg' ? 'h-8 w-8 rounded-[9px]' : 'h-7 w-7 rounded-lg';
-  const icon = size === 'lg' ? 18 : 16;
+/** The airaa mark: an ink tile with a rising line and an orange live dot. */
+export function Mark({ size = 34 }: { size?: number }) {
+  const dot = Math.round(size * 0.3);
   return (
-    <Link href="/" className="flex items-center gap-2.5 text-ink no-underline" aria-label="AIRAA home">
-      <span className={`flex ${box} items-center justify-center bg-accent/[0.14]`}>
-        <svg width={icon} height={icon} viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3 17l6-6 4 4 8-8" />
-          <path d="M14 7h7v7" />
-        </svg>
-      </span>
-      <span className={`font-display font-bold ${size === 'lg' ? 'text-[19px] tracking-[0.5px]' : 'text-[17px]'}`}>AIRAA</span>
+    <span
+      aria-hidden="true"
+      className="relative flex shrink-0 items-center justify-center bg-ink"
+      style={{ width: size, height: size, borderRadius: Math.round(size / 3) }}
+    >
+      <svg width={size / 2} height={size / 2} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 16l5-5 4 4 7-7" />
+      </svg>
+      <span className="absolute rounded-full border-2 border-white bg-accent" style={{ width: dot, height: dot, right: -3, top: -3 }} />
+    </span>
+  );
+}
+
+/** Mark plus wordmark; links home. */
+export default function Logo({ size = 34 }: { size?: number }) {
+  return (
+    <Link href="/" className="flex items-center gap-2.5 text-ink no-underline" aria-label="airaa home">
+      <Mark size={size} />
+      <span className="font-display text-[21px] font-extrabold tracking-[-0.6px]">airaa</span>
     </Link>
   );
 }

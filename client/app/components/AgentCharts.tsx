@@ -7,9 +7,11 @@ import {
 } from 'recharts';
 import type { ChartSpec } from '../../lib/api';
 
-const COLORS = ['#22d3ee', '#a78bfa', '#f5a524', '#34d399', '#f472b6'];
-const AXIS_TICK = { fill: '#7a889d', fontSize: 11 };
-const VALUE_LABEL = { fill: '#c9d3e0', fontSize: 10, fontFamily: 'var(--font-code), monospace' };
+const COLORS = ['#0b0d12', '#7c5ce0', '#ff5a1f', '#2448c8', '#077a4b'];
+/** Pastel tile behind each chart, matching the board's pins. */
+const TILES = ['#dcf3e6', '#ece5ff', '#e2eaff', '#fff1bf', '#ffe7db'];
+const AXIS_TICK = { fill: '#5b616e', fontSize: 11 };
+const VALUE_LABEL = { fill: '#0b0d12', fontSize: 11, fontWeight: 700 };
 /** Bars carry value labels instead of a y-axis up to this many categories. */
 const MAX_LABELLED_BARS = 8;
 
@@ -69,16 +71,16 @@ const tooltip = (fmt: (v: unknown) => string, cursor: object) => (
   <Tooltip
     formatter={(v, name) => [fmt(v), name]}
     labelFormatter={(l) => String(l)}
-    contentStyle={{ background: '#0d1422', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 10, fontSize: 12 }}
-    labelStyle={{ color: '#9aa8bc' }}
-    itemStyle={{ color: '#e6edf6' }}
+    contentStyle={{ background: '#ffffff', border: '1px solid #e7e8ec', borderRadius: 10, fontSize: 12 }}
+    labelStyle={{ color: '#2a2e37' }}
+    itemStyle={{ color: '#0b0d12' }}
     cursor={cursor}
   />
 );
 
 function BarBody({ spec, color, horizontal }: { spec: ChartSpec; color: (i: number) => string; horizontal: boolean }) {
   const fmt = formatter(spec.y_format, false);
-  const tip = tooltip(exact(spec.y_format, false), { fill: 'rgba(255,255,255,0.04)' });
+  const tip = tooltip(exact(spec.y_format, false), { fill: 'rgba(11,13,18,0.05)' });
   const multi = spec.series.length > 1;
   const labelled = !multi && spec.data.length <= MAX_LABELLED_BARS;
 
@@ -87,9 +89,9 @@ function BarBody({ spec, color, horizontal }: { spec: ChartSpec; color: (i: numb
       <BarChart data={spec.data} layout="vertical" margin={{ top: 0, right: labelled ? 52 : 8, bottom: 0, left: 0 }} barCategoryGap={6}>
         <XAxis type="number" hide />
         <YAxis type="category" dataKey={spec.x_key} width={104} tickFormatter={tickLabel(15)}
-          tick={{ ...AXIS_TICK, fill: '#9aa8bc', fontSize: 12 }} tickLine={false} axisLine={false} interval={0} />
+          tick={{ ...AXIS_TICK, fill: '#2a2e37', fontSize: 12 }} tickLine={false} axisLine={false} interval={0} />
         {tip}
-        {multi && <Legend wrapperStyle={{ fontSize: 12, color: '#9aa8bc' }} />}
+        {multi && <Legend wrapperStyle={{ fontSize: 12, color: '#2a2e37' }} />}
         {spec.series.map((s, i) => (
           <Bar key={s.key} dataKey={s.key} name={s.label} fill={color(i)} radius={[0, 3, 3, 0]} maxBarSize={14}>
             {labelled && <LabelList dataKey={s.key} position="right" formatter={fmt} style={VALUE_LABEL} />}
@@ -102,15 +104,15 @@ function BarBody({ spec, color, horizontal }: { spec: ChartSpec; color: (i: numb
   const tilt = spec.data.length > 6;
   return (
     <BarChart data={spec.data} margin={{ top: labelled ? 18 : 8, right: 4, bottom: 0, left: 0 }} barCategoryGap="14%">
-      {!labelled && <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />}
-      <XAxis dataKey={spec.x_key} tickFormatter={tickLabel(16)} tick={{ ...AXIS_TICK, fill: '#9aa8bc' }}
-        tickLine={false} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} interval={0}
+      {!labelled && <CartesianGrid stroke="rgba(11,13,18,0.1)" vertical={false} />}
+      <XAxis dataKey={spec.x_key} tickFormatter={tickLabel(16)} tick={{ ...AXIS_TICK, fill: '#2a2e37' }}
+        tickLine={false} axisLine={{ stroke: 'rgba(11,13,18,0.18)' }} interval={0}
         angle={tilt ? -30 : 0} textAnchor={tilt ? 'end' : 'middle'} height={tilt ? 56 : 28} />
       <YAxis hide={labelled} tickFormatter={fmt} tick={AXIS_TICK} tickLine={false} axisLine={false} width={60} />
       {tip}
-      {multi && <Legend wrapperStyle={{ fontSize: 12, color: '#9aa8bc' }} />}
+      {multi && <Legend wrapperStyle={{ fontSize: 12, color: '#2a2e37' }} />}
       {spec.series.map((s, i) => (
-        <Bar key={s.key} dataKey={s.key} name={s.label} fill={color(i)} radius={[5, 5, 0, 0]} maxBarSize={72} minPointSize={3}>
+        <Bar key={s.key} dataKey={s.key} name={s.label} fill={color(i)} radius={[10, 10, 3, 3]} maxBarSize={72} minPointSize={3}>
           {labelled && <LabelList dataKey={s.key} position="top" formatter={fmt} style={VALUE_LABEL} />}
         </Bar>
       ))}
@@ -124,12 +126,12 @@ function SeriesBody({ spec, color }: { spec: ChartSpec; color: (i: number) => st
   const multi = spec.series.length > 1;
   const axes = (
     <>
-      <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+      <CartesianGrid stroke="rgba(11,13,18,0.1)" vertical={false} />
       <XAxis dataKey={spec.x_key} tickFormatter={tickLabel()} tick={AXIS_TICK} tickLine={false}
-        axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} minTickGap={28} interval="preserveStartEnd" />
+        axisLine={{ stroke: 'rgba(11,13,18,0.18)' }} minTickGap={28} interval="preserveStartEnd" />
       <YAxis tickFormatter={fmt} tick={AXIS_TICK} tickLine={false} axisLine={false} width={60} domain={['auto', 'auto']} />
-      {tooltip(exact(spec.y_format, signed), { stroke: 'rgba(255,255,255,0.2)' })}
-      {multi && <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: '#9aa8bc' }} />}
+      {tooltip(exact(spec.y_format, signed), { stroke: 'rgba(11,13,18,0.3)' })}
+      {multi && <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: '#2a2e37' }} />}
     </>
   );
 
@@ -164,16 +166,19 @@ function SeriesBody({ spec, color }: { spec: ChartSpec; color: (i: number) => st
 }
 
 function ChartCard({ spec, index, wide, narrow }: { spec: ChartSpec; index: number; wide: boolean; narrow: boolean }) {
-  // One series: colour by chart position so neighbouring charts differ. Several: colour by series.
-  const color = (i: number) => COLORS[(spec.series.length > 1 ? i : index) % COLORS.length];
+  // One series: ink on the pastel tile. Several: one colour per series.
+  const color = (i: number) => COLORS[(spec.series.length > 1 ? i : 0) % COLORS.length];
   const horizontal = spec.kind === 'bar' && narrow;
   const height = horizontal ? Math.max(120, spec.data.length * 24 + 8) : 208;
 
   return (
-    <figure className={`m-0 min-w-0 rounded-[14px] border border-line bg-surface px-3.5 py-3 sm:px-4 sm:py-3.5 ${wide ? 'md:col-span-2' : ''}`}>
-      <figcaption className="mb-3 flex flex-col gap-0.5 sm:mb-3.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
-        <span className="text-[13px] font-medium text-ink sm:text-sm">{spec.title}</span>
-        {spec.subtitle && <span className="truncate text-[11px] text-subtle">{spec.subtitle}</span>}
+    <figure
+      className={`anim-rise m-0 min-w-0 rounded-3xl p-4 sm:p-[22px] ${wide ? 'md:col-span-2' : ''}`}
+      style={{ background: TILES[index % TILES.length], animationDelay: `${index * 80}ms` }}
+    >
+      <figcaption className="mb-3 flex flex-col gap-0.5 sm:mb-4 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+        <span className="font-display text-base font-bold text-ink sm:text-lg">{spec.title}</span>
+        {spec.subtitle && <span className="truncate text-xs text-ink-3/70">{spec.subtitle}</span>}
       </figcaption>
       <div className="w-full" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">

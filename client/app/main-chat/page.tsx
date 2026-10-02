@@ -4,6 +4,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import { Clock, Copy, Check, Square, ArrowUp, ChevronDown, Plus } from 'lucide-react';
+import { Mark } from '../components/Logo';
+import { TIME_RANGES } from '../components/AskBox';
 import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
 import Markdown from '../components/Markdown';
 import Logo from '../components/Logo';
@@ -45,22 +47,15 @@ interface ResearchResult {
 }
 
 const SUGGESTIONS = [
-  { tag: 'DeFi', text: 'Which DEXs lead on Arbitrum today, and how are their fees?' },
-  { tag: 'Yields', text: 'Best stablecoin yields right now?' },
-  { tag: 'Charts', text: 'Chart ETH vs SOL over the last 30 days' },
-  { tag: 'News', text: 'Why is the crypto market moving today?' },
+  { tag: 'DeFi', text: 'Which DEXs lead on Arbitrum today, and how are their fees?', tone: 'bg-sky text-[#1e3a8a]' },
+  { tag: 'Yields', text: 'Best stablecoin yields right now?', tone: 'bg-mint text-[#0f5b3a]' },
+  { tag: 'Charts', text: 'Chart ETH vs SOL over the last 30 days', tone: 'bg-butter text-[#6b4e00]' },
+  { tag: 'News', text: 'Why is the crypto market moving today?', tone: 'bg-peach text-[#8a3412]' },
 ];
-
-const TIME_RANGES = [
-  ['1d', '24 hours'],
-  ['7d', '7 days'],
-  ['30d', '30 days'],
-  ['90d', '90 days'],
-  ['1y', '1 year'],
-] as const;
 
 interface LiveRun {
   stage: string;
+  step: number;
   planner?: string;
   rationale?: string;
   tools: ToolProgress[];
@@ -92,8 +87,10 @@ interface ConversationHistory {
   last_activity: string;
 }
 
+const STAGE_STEP: Record<string, number> = { planning: 0, gathering: 1, synthesizing: 3 };
+
 const SECONDARY_BTN =
-  'inline-flex min-h-11 sm:min-h-10 items-center justify-center gap-1.5 rounded-[10px] border border-line-strong bg-transparent px-3 text-[13px] text-ink-3 transition-colors hover:border-white/30 hover:text-ink touch-manipulation';
+  'inline-flex min-h-11 sm:min-h-10 items-center justify-center gap-1.5 rounded-full bg-field px-4 text-sm font-semibold text-ink transition-[background-color,transform] hover:bg-field-hover active:scale-95 touch-manipulation';
 
 export default function MainChat() {
   const { address: connectedAddress } = useAccount();
@@ -107,6 +104,8 @@ export default function MainChat() {
   const [live, setLive] = useState<LiveRun | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const pendingAsk = useRef<string | null>(null);
+  const [openActivity, setOpenActivity] = useState<Record<string, boolean>>({});
   const endOfChatRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const hasConversation = messages.length > 0;
@@ -116,8 +115,30 @@ export default function MainChat() {
   // Check API health on component mount
   useEffect(() => {
     checkApiHealth();
-    initializeSession();
+
+    // Arriving from the home ask box or a pin: open the chat and ask straight away
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q')?.trim();
+    if (q) {
+      const range = params.get('range');
+      if (range && TIME_RANGES.some(([v]) => v === range)) setTimeRange(range);
+      window.history.replaceState(null, '', '/main-chat');
+      persistSession(newSessionId());
+      setMessages([]);
+      pendingAsk.current = q;
+    } else {
+      initializeSession();
+    }
   }, []);
+
+  // Send the question carried in the URL once the session id is in state
+  useEffect(() => {
+    if (pendingAsk.current && sessionId) {
+      const q = pendingAsk.current;
+      pendingAsk.current = null;
+      handleSend(q);
+    }
+  }, [sessionId]);
 
   // Sync connected wallet address
   useEffect(() => {
@@ -234,7 +255,7 @@ export default function MainChat() {
     setQuery('');
 
     setLoading(true);
-    setLive({ stage: 'Starting…', tools: [], draft: '', charts: [] });
+    setLive({ stage: 'Starting…', step: 0, tools: [], draft: '', charts: [] });
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -244,7 +265,7 @@ export default function MainChat() {
     const onEvent = (event: AgentEvent) => {
       switch (event.type) {
         case 'status':
-          setLive(prev => prev && { ...prev, stage: event.message });
+          setLive(prev => prev && { ...prev, stage: event.message, step: STAGE_STEP[event.stage] ?? prev.step });
           break;
         case 'plan':
           setLive(prev => prev && {
@@ -265,6 +286,9 @@ export default function MainChat() {
           break;
         case 'chart':
           setLive(prev => prev && { ...prev, charts: [...prev.charts, event.chart] });
+          break;
+        case 'followup':
+          setLive(prev => prev && { ...prev, step: 2, stage: 'Filling gaps in the data' });
           break;
         case 'tool_start':
           setLive(prev => prev && (prev.tools.some(t => t.tool === event.tool)
@@ -586,56 +610,63 @@ export default function MainChat() {
     return flattened;
   };
 
+  const AssistantRow = ({ children, meta }: { children: React.ReactNode; meta?: React.ReactNode }) => (
+    <div className="flex items-start gap-3 sm:gap-3.5">
+      <span className="hidden sm:block"><Mark size={36} /></span>
+      <span className="sm:hidden"><Mark size={30} /></span>
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex min-h-9 flex-wrap items-center gap-2">
+          <span className="font-bold">airaa</span>
+          {meta}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+
   const renderAssistant = (m: ChatMessage) => {
     const res = m.result;
     const failed = !!res && !res.success;
     const canExport = !!res && res.success && !!(res.data || res.result || res.merged_data);
     const hasStructured = !!res?.success && !!res.merged_data && typeof res.merged_data === 'object' && Object.keys(res.merged_data).length > 0;
+    const hasActivity = !!res?.success && !!(res.tool_trace?.length || res.reasoning_steps?.length);
     const parts = m.text && !failed ? splitAnswer(m.text) : null;
+    const sources = res?.data_sources_used?.length ?? 0;
+
+    const meta = res?.success ? (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e3f5ec] px-2.5 py-1 text-xs font-semibold text-[#075e3a]">
+        <Check className="h-3 w-3" strokeWidth={3} aria-hidden="true" />
+        {res.execution_time != null ? `Answered in ${Number(res.execution_time).toFixed(1)}s` : 'Answered'}
+        {sources > 0 && <span className="hidden sm:inline"> · {sources} {sources === 1 ? 'source' : 'sources'}</span>}
+      </span>
+    ) : undefined;
 
     return (
-      <article className="flex flex-col gap-4">
+      <AssistantRow meta={meta}>
         {res?.success && <AgentCharts charts={res.charts} />}
 
         {failed ? (
-          <div className="rounded-xl border border-red-400/30 bg-red-500/[0.08] px-3.5 py-3 text-sm text-red-200" role="alert">
-            {m.text}
-          </div>
+          <div className="rounded-[22px] bg-[#ffe4e1] px-[18px] py-3.5 text-sm text-[#a3231a]" role="alert">{m.text}</div>
         ) : parts && (
           <div>
             <Markdown>{parts.body}</Markdown>
-            {parts.next.length > 0 && (
-              <>
-                <h3 className="mb-2 mt-[22px] font-display text-base font-semibold text-ink sm:text-[17px]">Next questions</h3>
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  {parts.next.map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => handleSend(q)}
-                      disabled={loading}
-                      className="min-h-11 rounded-xl border border-line-strong bg-transparent px-3.5 text-left text-sm text-ink-3 transition-colors hover:border-accent/50 hover:bg-accent/[0.06] hover:text-ink disabled:opacity-50 sm:min-h-10 sm:rounded-full touch-manipulation"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
             {parts.footer.length > 0 && (
-              <div className="mt-5 border-t border-white/[0.08] pt-3 text-xs italic text-muted sm:text-[13px]">
+              <div className="mt-4 text-[13px] text-muted">
                 {parts.footer.map((line) => <p key={line} className="m-0">{line}</p>)}
               </div>
             )}
           </div>
         )}
 
-        {res?.success && (
-          <ActivitySummary trace={res.tool_trace} steps={res.reasoning_steps} seconds={res.execution_time} planner={res.planner} />
-        )}
-
         {canExport && (
-          <div className="flex gap-2 sm:flex-wrap">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => copyMessage(m.id, m.text!)} className={SECONDARY_BTN}>
+              {copiedId === m.id ? <Check className="h-3.5 w-3.5 text-up" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+              {copiedId === m.id ? 'Copied' : 'Copy'}
+            </button>
+            <button type="button" onClick={() => downloadResult(res!, 'pdf')} className={SECONDARY_BTN}>Export PDF</button>
+            <button type="button" onClick={() => downloadResult(res!, 'excel')} className={`${SECONDARY_BTN} hidden sm:inline-flex`}>Excel</button>
+            <button type="button" onClick={() => downloadResult(res!, 'json')} className={SECONDARY_BTN}>JSON</button>
             {hasStructured && (
               <button
                 type="button"
@@ -644,31 +675,34 @@ export default function MainChat() {
                 className={`${SECONDARY_BTN} hidden sm:inline-flex`}
               >
                 Explore the data
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${openViz[m.id] ? 'rotate-180' : ''}`} aria-hidden="true" />
               </button>
             )}
-            {m.text && (
-              <button type="button" onClick={() => copyMessage(m.id, m.text!)} className={`${SECONDARY_BTN} flex-1 sm:flex-none`}>
-                {copiedId === m.id ? <Check className="h-3.5 w-3.5 text-ok" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                {copiedId === m.id ? 'Copied' : 'Copy'}
+            {hasActivity && (
+              <button
+                type="button"
+                onClick={() => setOpenActivity(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
+                aria-expanded={!!openActivity[m.id]}
+                className={SECONDARY_BTN}
+              >
+                How I got here
+                <ChevronDown className={`h-4 w-4 transition-transform ${openActivity[m.id] ? 'rotate-180' : ''}`} aria-hidden="true" />
               </button>
-            )}
-            {canExport && (
-              <>
-                <button type="button" onClick={() => downloadResult(res!, 'pdf')} className={`${SECONDARY_BTN} flex-1 sm:flex-none`}>
-                  <span className="sm:hidden">PDF</span><span className="hidden sm:inline">Export PDF</span>
-                </button>
-                <button type="button" onClick={() => downloadResult(res!, 'excel')} className={`${SECONDARY_BTN} hidden sm:inline-flex`}>Excel</button>
-                <button type="button" onClick={() => downloadResult(res!, 'json')} className={`${SECONDARY_BTN} flex-1 sm:flex-none`}>
-                  <span className="sm:hidden">Data</span><span className="hidden sm:inline">JSON</span>
-                </button>
-              </>
             )}
           </div>
         )}
 
+        {res?.success && (
+          <ActivitySummary
+            open={!!openActivity[m.id]}
+            trace={res.tool_trace}
+            steps={res.reasoning_steps}
+            seconds={res.execution_time}
+            planner={res.planner}
+          />
+        )}
+
         {hasStructured && openViz[m.id] && (
-          <div className="hidden rounded-xl border border-line bg-black/20 p-2 sm:block sm:p-3">
+          <div className="hidden rounded-3xl bg-ink p-3 text-white sm:block">
             <DataVisualization
               data={res!.merged_data}
               title="Research Data"
@@ -677,32 +711,50 @@ export default function MainChat() {
             />
           </div>
         )}
-      </article>
+
+        {parts && parts.next.length > 0 && (
+          <div className="grid gap-2.5 sm:grid-cols-3">
+            {parts.next.slice(0, 3).map((q, i) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => handleSend(q)}
+                disabled={loading}
+                className={`pin rounded-[20px] px-[18px] py-4 text-left disabled:opacity-50 touch-manipulation ${['bg-ink text-white', 'bg-butter text-ink', 'bg-sky text-ink'][i]}`}
+              >
+                <span className={`block text-xs font-bold ${['text-[#ff8a5c]', 'text-[#6b4e00]', 'text-[#1e3a8a]'][i]}`}>Ask next</span>
+                <span className="mt-1.5 block font-display text-[17px] font-bold leading-[1.2]">{q}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </AssistantRow>
     );
   };
 
   const statusLabel = isOnline === null ? 'Connecting' : isOnline ? 'Online' : 'Offline';
+  const title = messages.find((m) => m.role === 'user')?.text;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-[15px] leading-[1.6] text-ink">
-      {/* Header */}
-      <header className="shrink-0 border-b border-white/[0.07]">
-        <div className="mx-auto flex h-14 w-full max-w-[820px] items-center gap-3 px-4 sm:h-[60px]">
+    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-[15px] leading-[1.55] text-ink">
+      <header className="shrink-0 border-b border-line-2">
+        <div className="mx-auto flex max-w-[1360px] items-center gap-3 px-3 py-2 sm:gap-3.5 sm:px-6 sm:py-3">
           <Logo />
-          <span className="inline-flex items-center gap-1.5 text-xs text-subtle" title={`Agent ${statusLabel.toLowerCase()}`}>
-            <span className={`h-[7px] w-[7px] rounded-full ${isOnline ? 'bg-ok' : isOnline === false ? 'bg-danger' : 'bg-white/25'}`} />
-            <span className="hidden sm:inline">{statusLabel}</span>
-            <span className="sr-only sm:hidden">{statusLabel}</span>
+          <span className="hidden h-[22px] w-px bg-line sm:block" />
+          <span className="hidden min-w-0 truncate font-semibold text-ink-3 sm:block">{title ?? 'New chat'}</span>
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted" title={`Agent ${statusLabel.toLowerCase()}`}>
+            <span className={`h-[7px] w-[7px] rounded-full ${isOnline ? 'bg-up' : isOnline === false ? 'bg-down' : 'bg-[#d5d7dd]'}`} />
+            <span className="sr-only">{statusLabel}</span>
           </span>
           <div className="ml-auto flex items-center gap-2">
             {hasConversation && (
               <button
                 type="button"
                 onClick={startNewSession}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-[10px] border border-line-strong text-sm font-medium text-ink-3 transition-colors hover:border-white/30 hover:text-ink sm:h-auto sm:min-h-10 sm:w-auto sm:px-3 touch-manipulation"
+                className="inline-flex h-11 w-11 items-center justify-center gap-1.5 rounded-full bg-field text-sm font-semibold text-ink transition-colors hover:bg-field-hover sm:w-auto sm:px-4 touch-manipulation"
                 aria-label="New chat"
               >
-                <Plus className="h-[18px] w-[18px] sm:hidden" aria-hidden="true" />
+                <Plus className="h-[18px] w-[18px] sm:h-4 sm:w-4" aria-hidden="true" />
                 <span className="hidden sm:inline">New chat</span>
               </button>
             )}
@@ -713,45 +765,46 @@ export default function MainChat() {
 
       <main className="min-h-0 flex-1 overflow-y-auto" id="chat-scroll">
         {!hasConversation && !loading ? (
-          <div className="mx-auto flex max-w-[820px] flex-col gap-7 px-4 pb-6 pt-10 sm:pt-[72px]">
-            <div>
-              <h1 className="m-0 font-display text-[28px] font-semibold leading-tight tracking-[-0.6px] sm:text-[34px]">
-                What do you want to research?
-              </h1>
+          <div className="mx-auto flex max-w-[780px] flex-col gap-7 px-4 pb-6 pt-10 sm:px-6 sm:pt-[72px]">
+            <div className="anim-rise">
+              <h1 className="m-0 font-display text-[30px] font-extrabold leading-tight tracking-[-1px] sm:text-[40px]">What do you want to research?</h1>
               <p className="mt-2.5 max-w-[560px] text-muted">
                 Prices, DeFi metrics, news, links and wallets. Every answer shows its sources, and charts come from the fetched numbers.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTIONS.map((s, i) => (
                 <button
                   key={s.text}
                   type="button"
                   onClick={() => handleSend(s.text)}
-                  className="flex min-w-0 flex-col gap-1.5 rounded-[14px] border border-white/10 bg-surface px-[18px] py-4 text-left text-ink transition-colors hover:border-accent/40 hover:bg-[#101a2b] touch-manipulation"
+                  className={`pin anim-rise flex min-w-0 flex-col gap-1.5 rounded-3xl px-5 py-[18px] text-left touch-manipulation ${s.tone}`}
+                  style={{ animationDelay: `${(i + 1) * 70}ms` }}
                 >
-                  <span className="text-xs font-medium text-accent">{s.tag}</span>
-                  <span className="font-medium">{s.text}</span>
+                  <span className="text-xs font-bold uppercase tracking-[0.6px]">{s.tag}</span>
+                  <span className="font-display text-xl font-bold leading-[1.15] tracking-[-0.3px] text-ink">{s.text}</span>
                 </button>
               ))}
             </div>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-[820px] flex-col gap-[22px] px-4 py-[18px] sm:py-7" aria-live="polite">
+          <div className="mx-auto flex max-w-[780px] flex-col gap-7 px-3 py-6 sm:px-6 sm:py-8" aria-live="polite">
             {messages.map((m) => m.role === 'user' ? (
-              <div key={m.id} className="max-w-[88%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-accent/[0.12] px-3.5 py-2.5 sm:max-w-[85%] sm:px-4">
+              <div key={m.id} className="anim-rise max-w-[85%] self-end whitespace-pre-wrap rounded-[24px_24px_6px_24px] bg-ink px-[18px] py-3 text-base text-white sm:max-w-[80%]">
                 {m.text}
               </div>
             ) : (
-              <div key={m.id}>{renderAssistant(m)}</div>
+              <div key={m.id} className="anim-rise">{renderAssistant(m)}</div>
             ))}
 
             {loading && live && (
-              <div className="flex flex-col gap-4 sm:gap-[22px]">
-                <LiveActivity stage={live.stage} planner={live.planner} rationale={live.rationale} tools={live.tools} />
-                <AgentCharts charts={live.charts} />
+              <AssistantRow>
+                <LiveActivity stage={live.stage} step={live.step} planner={live.planner} rationale={live.rationale} tools={live.tools} />
+                {live.charts.length > 0 ? <AgentCharts charts={live.charts} /> : live.step >= 1 && (
+                  <div className="shimmer-tint h-[200px] rounded-3xl bg-mint" aria-label="Waiting for data" />
+                )}
                 {live.draft && <Markdown streaming>{live.draft}</Markdown>}
-              </div>
+              </AssistantRow>
             )}
 
             <div ref={endOfChatRef} />
@@ -759,91 +812,66 @@ export default function MainChat() {
         )}
       </main>
 
-      {/* Composer */}
-      <footer className="shrink-0">
+      <footer className="anim-dock shrink-0 bg-gradient-to-t from-white from-70% to-transparent">
         <form
-          className="mx-auto max-w-[820px] px-3 pb-3.5 pt-2 sm:px-4 sm:pb-4"
+          className="mx-auto max-w-[780px] px-3 pb-3.5 pt-2 sm:px-6 sm:pb-[18px]"
           onSubmit={(e) => {
             e.preventDefault();
             handleSend();
           }}
         >
-          <div
-            className={`rounded-2xl border bg-surface p-1.5 pl-3 transition-colors focus-within:border-accent/45 sm:rounded-[18px] sm:p-2.5 sm:pb-2 ${
-              hasConversation ? 'border-white/[0.12]' : 'border-accent/35'
-            }`}
-          >
-            <div className="flex items-end gap-2 sm:block">
-              <label htmlFor="composer" className="sr-only">Your question</label>
-              <textarea
-                id="composer"
-                ref={inputRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                rows={hasConversation ? 1 : 2}
-                placeholder={hasConversation ? 'Ask a follow-up…' : 'Ask about a token, protocol, wallet, link or market…'}
-                className="max-h-40 min-h-11 w-full flex-1 resize-none border-0 bg-transparent py-2.5 text-base text-ink placeholder:text-subtle focus:outline-none sm:px-2 sm:py-1.5"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-              />
-              <div className="sm:hidden">{renderSendButton()}</div>
-            </div>
-            <div className="hidden items-center gap-2 sm:flex">
-              <label className="inline-flex min-h-9 items-center gap-1.5 rounded-[9px] bg-white/[0.05] px-2.5 text-[13px] text-muted">
-                <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-                <select
-                  value={timeRange}
-                  onChange={(e) => setTimeRange(e.target.value)}
-                  className="cursor-pointer border-0 bg-transparent text-ink-3 focus:outline-none"
-                  aria-label="Time range"
-                >
-                  {TIME_RANGES.map(([value, label]) => (
-                    <option key={value} className="bg-surface" value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              {!loading && (address ? (
-                <span className="inline-flex items-center gap-1.5 font-mono text-xs text-subtle" title={address}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-ok/70" />
-                  {address.slice(0, 6)}…{address.slice(-4)}
-                </span>
-              ) : (
-                <span className="text-xs text-subtle">Connect a wallet for on-chain questions</span>
-              ))}
-              <div className="ml-auto">{renderSendButton()}</div>
-            </div>
+          <div className="askbox flex items-center gap-2 rounded-[30px] border border-[#dcdde2] bg-white py-1.5 pl-[18px] pr-1.5 sm:gap-2.5 sm:pl-[22px]">
+            <label htmlFor="composer" className="sr-only">Message airaa</label>
+            <textarea
+              id="composer"
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              rows={1}
+              placeholder={hasConversation ? 'Ask a follow-up' : 'Ask about a token, protocol, wallet, link or market'}
+              className="max-h-40 min-h-11 min-w-0 flex-1 resize-none border-0 bg-transparent py-[11px] text-base text-ink placeholder:text-muted focus:outline-none sm:text-[17px]"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+            />
+            <label className="hidden min-h-9 items-center gap-1.5 rounded-full bg-field px-3 text-[13px] font-semibold text-ink-3 sm:inline-flex">
+              <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="sr-only">Time range</span>
+              <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className="cursor-pointer border-0 bg-transparent font-semibold focus:outline-none">
+                {TIME_RANGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            {loading ? (
+              <button
+                type="button"
+                onClick={stopGenerating}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ffe4e1] text-[#a3231a] transition-transform active:scale-90 touch-manipulation"
+                aria-label="Stop"
+                title="Stop"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!query.trim()}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-ink text-white transition-[transform,background-color,color] hover:bg-accent hover:text-ink active:scale-90 disabled:cursor-not-allowed disabled:bg-field disabled:text-muted touch-manipulation"
+                aria-label="Send"
+                title="Send (Enter)"
+              >
+                <ArrowUp className="h-5 w-5" strokeWidth={2.4} aria-hidden="true" />
+              </button>
+            )}
           </div>
-          <p className="mt-2 hidden text-center text-xs text-subtle sm:block">AI-generated research, not financial advice.</p>
+          <p className="mt-2 text-center text-xs text-muted">
+            {address ? <span className="tabular">Wallet {address.slice(0, 6)}…{address.slice(-4)} · </span> : null}
+            AI-generated research, not financial advice.
+          </p>
         </form>
       </footer>
     </div>
   );
-
-  function renderSendButton() {
-    return loading ? (
-      <button
-        type="button"
-        onClick={stopGenerating}
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-400/45 bg-red-400/[0.12] text-red-300 transition-colors hover:bg-red-400/20 touch-manipulation"
-        aria-label="Stop"
-        title="Stop"
-      >
-        <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
-      </button>
-    ) : (
-      <button
-        type="submit"
-        disabled={!query.trim()}
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent transition-colors hover:bg-accent-hover active:scale-95 disabled:cursor-not-allowed disabled:bg-white/[0.08] disabled:text-subtle touch-manipulation"
-        aria-label="Send"
-        title="Send (Enter)"
-      >
-        <ArrowUp className="h-5 w-5" strokeWidth={2.4} aria-hidden="true" />
-      </button>
-    );
-  }
 }

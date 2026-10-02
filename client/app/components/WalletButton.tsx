@@ -4,28 +4,27 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Wallet } from 'lucide-react';
 
 const BASE =
-  'inline-flex min-h-11 sm:min-h-10 items-center gap-2 rounded-[10px] border border-white/[0.16] bg-transparent px-3 text-sm font-medium text-ink-3 transition-colors hover:border-white/30 hover:text-ink touch-manipulation';
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-full border-[1.5px] border-ink bg-white px-4 text-sm font-semibold text-ink transition-colors hover:bg-field touch-manipulation';
 
-/** Wallet control in the chat header: "Connect wallet", or the short address once connected. */
+/** Wallet control: "Connect wallet", or the short address once connected. */
 export default function WalletButton() {
   return (
     <ConnectButton.Custom>
       {({ account, chain, mounted, openAccountModal, openChainModal, openConnectModal }) => {
-        const ready = mounted;
-        const connected = ready && account && chain;
+        const connected = mounted && account && chain;
         return (
-          <div aria-hidden={!ready} className={ready ? '' : 'pointer-events-none select-none opacity-0'}>
+          <div aria-hidden={!mounted} className={mounted ? '' : 'pointer-events-none select-none opacity-0'}>
             {!connected ? (
-              <button type="button" onClick={openConnectModal} className={`${BASE} text-ink`} aria-label="Connect wallet">
+              <button type="button" onClick={openConnectModal} className={`${BASE} w-11 px-0 sm:w-auto sm:px-4`} aria-label="Connect wallet">
                 <Wallet className="h-4 w-4" aria-hidden="true" />
                 <span className="hidden sm:inline">Connect wallet</span>
               </button>
             ) : chain.unsupported ? (
-              <button type="button" onClick={openChainModal} className={`${BASE} border-red-400/45 text-red-300`}>
+              <button type="button" onClick={openChainModal} className={`${BASE} border-down text-down`}>
                 Wrong network
               </button>
             ) : (
-              <button type="button" onClick={openAccountModal} className={`${BASE} font-mono`} title={account.address}>
+              <button type="button" onClick={openAccountModal} className={`${BASE} tabular`} title={account.address}>
                 {account.address.slice(0, 4)}…{account.address.slice(-4)}
               </button>
             )}

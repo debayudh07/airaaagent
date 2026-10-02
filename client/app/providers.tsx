@@ -64,10 +64,10 @@ export default function Providers(props: {
   const [config] = useState(() => getConfig(connectors));
   const [queryClient] = useState(() => new QueryClient());
 
-const selectedTheme = darkTheme({
-    accentColor: "#22d3ee",
-    accentColorForeground: "#03161c",
-    borderRadius: "medium",
+const selectedTheme = lightTheme({
+    accentColor: "#0b0d12",
+    accentColorForeground: "#ffffff",
+    borderRadius: "large",
     fontStack: "system",
     overlayBlur: "small",
 });

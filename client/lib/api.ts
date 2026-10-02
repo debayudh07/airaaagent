@@ -48,6 +48,58 @@ export const TOOL_LABELS: Record<string, string> = {
 
 export const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
 
+// ------------------------------------------------------------------ home board feed
+export interface FeedMarket {
+  id: string;
+  symbol: string;
+  name: string;
+  price: number | null;
+  change_24h: number | null;
+  change_7d: number | null;
+  change_30d: number | null;
+  sparkline_7d: number[];
+}
+
+export interface FeedNews {
+  title: string;
+  url: string;
+  source: string;
+  published: string | null;
+  summary: string;
+}
+
+export interface FeedVolume {
+  chain: string;
+  total24h: number | null;
+  top: Array<{ name: string; total24h: number | null }>;
+}
+
+export interface FeedSections {
+  markets?: FeedMarket[];
+  yields?: Array<{ project: string; chain: string; symbol: string; apy: number; tvl_usd: number }>;
+  stablecoins?: Array<{ symbol: string; name: string; circulating_usd: number }>;
+  dex?: FeedVolume;
+  fees?: FeedVolume;
+  protocols?: Array<{ slug: string; name: string; tvl_usd: number }>;
+  news?: FeedNews[];
+}
+
+export interface Feed {
+  success: boolean;
+  generated_at: string;
+  sections: FeedSections;
+}
+
+export async function fetchFeed(signal?: AbortSignal): Promise<Feed> {
+  const response = await fetch(`${API_BASE}/api/feed`, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+/** Link that opens a chat and asks `question` straight away. */
+export const askHref = (question: string, range?: string) =>
+  `/main-chat?q=${encodeURIComponent(question)}${range ? `&range=${encodeURIComponent(range)}` : ''}`;
+
 /**
  * POSTs a research query and invokes `onEvent` for every Server-Sent Event the
  * agent emits (plan, tool progress, answer tokens, final result).
