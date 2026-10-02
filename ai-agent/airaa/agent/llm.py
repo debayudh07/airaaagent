@@ -13,9 +13,11 @@ Temperature is left at the model default: Google recommends the default for the 
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
-from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
+import weakref
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -23,8 +25,21 @@ from ..config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-_cache: Dict[Tuple[str, int], ChatGoogleGenerativeAI] = {}
+# Clients hold async HTTP connections bound to the event loop that first used them, and the Flask
+# layer runs every request on a fresh loop. A process-wide cache therefore breaks from the second
+# request on ("Event loop is closed" -> RuntimeError). Cache per running loop instead; entries go
+# away with their loop.
+_per_loop: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[Any, Any]]" = weakref.WeakKeyDictionary()
 _lock = threading.Lock()
+
+
+def _loop_cache() -> Dict[Any, Any]:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return {}  # no loop (e.g. sync warm-up): build, do not cache
+    with _lock:
+        return _per_loop.setdefault(loop, {})
 
 
 def build_llm(model: str, settings: Settings | None = None, max_tokens: int | None = None) -> ChatGoogleGenerativeAI:
@@ -33,33 +48,29 @@ def build_llm(model: str, settings: Settings | None = None, max_tokens: int | No
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
     key = (model, max_tokens or settings.max_output_tokens)
-    with _lock:
-        if key not in _cache:
-            _cache[key] = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=settings.gemini_api_key,
-                max_tokens=key[1],
-                max_retries=1,  # fail over to the next model instead of retrying an overloaded one
-                timeout=90,
-            )
-        return _cache[key]
-
-
-_genai_client = None
+    cache = _loop_cache()
+    if key not in cache:
+        cache[key] = ChatGoogleGenerativeAI(
+            model=model,
+            google_api_key=settings.gemini_api_key,
+            max_tokens=key[1],
+            max_retries=1,  # fail over to the next model instead of retrying an overloaded one
+            timeout=90,
+        )
+    return cache[key]
 
 
 def genai_client():
-    """Shared ``google.genai`` client for features LangChain does not wrap (URL context)."""
-    global _genai_client
+    """``google.genai`` client for features LangChain does not wrap (URL context); cached per event loop."""
     from google import genai
 
-    with _lock:
-        if _genai_client is None:
-            settings = get_settings()
-            if not settings.gemini_api_key:
-                raise RuntimeError("GEMINI_API_KEY is not configured")
-            _genai_client = genai.Client(api_key=settings.gemini_api_key)
-        return _genai_client
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+    cache = _loop_cache()
+    if "genai" not in cache:
+        cache["genai"] = genai.Client(api_key=settings.gemini_api_key)
+    return cache["genai"]
 
 
 def _short(exc: Exception) -> str:

@@ -22,11 +22,5 @@ loglevel = os.getenv("LOG_LEVEL", "info")
 
 
 def post_fork(server, worker):
-    """Warm per-process clients so the first request after a (re)start is not slower."""
-    try:
-        from airaa.agent.llm import planner_llm, synthesis_llm
-
-        planner_llm()
-        synthesis_llm()
-    except Exception as exc:  # missing key etc. must not stop the worker from booting
-        server.log.warning("LLM warm-up skipped: %s", exc)
+    """Nothing to warm per process: model clients are created per request loop (see airaa/agent/llm.py);
+    preload_app already imported the heavy modules in the master."""
