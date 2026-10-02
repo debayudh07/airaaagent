@@ -14,7 +14,7 @@ ToolName = Literal[
     "coinmarketcap_tool", "coingecko_tool", "defillama_tool", "dune_analytics_tool", "etherscan_tool",
     "dexscreener_tool", "news_tool", "web_search_tool", "read_url_tool",
 ]
-Intent = Literal["analysis", "information", "market_data", "comparison", "technical", "defi", "general"]
+Intent = Literal["analysis", "information", "market_data", "comparison", "technical", "defi", "news", "general"]
 
 
 @dataclass

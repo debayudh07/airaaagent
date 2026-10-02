@@ -230,6 +230,8 @@ async def _protocol(slug: str, q: str) -> Dict[str, Any]:
         "tvl_change_7d_pct": round((latest - week_ago) / week_ago * 100, 2) if latest and week_ago else None,
         "current_chain_tvls": top_chain_tvls,
         "mcap": detail.get("mcap"),
+        # last ~year, at most 120 points: enough for a chart without bloating the response
+        "tvl_history": [[int(p["date"]), round(_number(p.get("totalLiquidityUSD")))] for p in series[-365:][::max(1, len(series[-365:]) // 120)] if "date" in p],
     }
     if isinstance(fees, dict):
         summary.update({

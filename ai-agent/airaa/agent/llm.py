@@ -45,6 +45,23 @@ def build_llm(model: str, settings: Settings | None = None, max_tokens: int | No
         return _cache[key]
 
 
+_genai_client = None
+
+
+def genai_client():
+    """Shared ``google.genai`` client for features LangChain does not wrap (URL context)."""
+    global _genai_client
+    from google import genai
+
+    with _lock:
+        if _genai_client is None:
+            settings = get_settings()
+            if not settings.gemini_api_key:
+                raise RuntimeError("GEMINI_API_KEY is not configured")
+            _genai_client = genai.Client(api_key=settings.gemini_api_key)
+        return _genai_client
+
+
 def _short(exc: Exception) -> str:
     text = str(exc)
     for marker in ("RESOURCE_EXHAUSTED", "UNAVAILABLE", "NOT_FOUND", "INVALID_ARGUMENT", "PERMISSION_DENIED", "DEADLINE"):

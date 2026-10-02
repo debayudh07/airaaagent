@@ -34,6 +34,7 @@ class Settings:
     coinmarketcap_api_key: str = field(default_factory=lambda: os.getenv("COINMARKETCAP_API_KEY", ""))
     etherscan_api_key: str = field(default_factory=lambda: os.getenv("ETHERSCAN_API_KEY", ""))
     dune_api_key: str = field(default_factory=lambda: os.getenv("DUNE_API_KEY", ""))
+    coingecko_api_key: str = field(default_factory=lambda: os.getenv("COINGECKO_API_KEY", ""))  # optional demo key
 
     # --- Models ---------------------------------------------------------
     # Synthesis writes the user-facing answer; the planner/reflector make
@@ -72,6 +73,10 @@ class Settings:
             "etherscan": bool(self.etherscan_api_key),
             "dune": bool(self.dune_api_key),
             "defillama": True,
+            "coingecko": True,
+            "dexscreener": True,
+            "web_search": True,
+            "news": True,
         }
 
 

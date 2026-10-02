@@ -9,11 +9,15 @@ from typing import Any, Dict, Iterable, List, Optional
 from ..config import Settings, get_settings
 from ..schemas import Entities, EventCallback, ResearchRequest
 from ..tools import TOOLS
+from ..tools.web import extract_urls
 
 logger = logging.getLogger(__name__)
 
+# The UI's time-range selector, used as the default chart window.
+_RANGE_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90, "1y": 365}
+
 _TRANSIENT_MARKERS = ("timed out", "timeout", "http 429", "http 500", "http 502", "http 503", "http 504",
-                      "rate limited", "connecterror", "readerror", "remoteprotocolerror")
+                      "rate limited", "http 429)", "connecterror", "readerror", "remoteprotocolerror")
 
 
 async def emit(on_event: EventCallback, event: Dict[str, Any]) -> None:
@@ -45,6 +49,17 @@ def build_tool_args(name: str, request: ResearchRequest, entities: Entities) -> 
         if not request.address:
             return None
         return {"query": q, "address": request.address, "chain": (entities.chain or "").lower() or None}
+    if name == "coingecko_tool":
+        return {"query": q, "symbols": entities.symbols or None, "days": entities.days or _RANGE_DAYS.get(request.time_range)}
+    if name == "dexscreener_tool":
+        return {"query": q, "search": entities.search_query or (" ".join(entities.symbols[:1]) or None)}
+    if name == "news_tool":
+        return {"query": q, "symbols": entities.symbols or None, "search": entities.search_query}
+    if name == "web_search_tool":
+        return {"query": q, "search": entities.search_query}
+    if name == "read_url_tool":
+        urls = entities.urls or extract_urls(q)
+        return {"query": q, "urls": urls} if urls else None
     return None
 
 

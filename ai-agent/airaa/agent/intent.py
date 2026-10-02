@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 _RULES = (
+    ("news", ("news", "headline", "announced", "announcement", "happening", "why did", "why is", "hack", "exploit")),
     ("comparison", ("compare", " vs ", "versus", "difference between")),
     ("analysis", ("analyze", "analyse", "analysis", "performance", "how is", "how's", "outlook", "should i", "invest")),
     ("information", ("what is", "what's", "tell me about", "info about", "information about", "explain", "details about")),
