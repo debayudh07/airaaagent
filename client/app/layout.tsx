@@ -1,27 +1,33 @@
-import type { Metadata } from "next";
-import { Oxanium, Noto_Sans_JP, JetBrains_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import Providers from "./providers";
 
-const display = Oxanium({
-  variable: "--font-display",
+const heading = Space_Grotesk({
+  variable: "--font-heading",
   subsets: ["latin"],
+  weight: ["500", "600", "700"],
 });
 
-const jp = Noto_Sans_JP({
-  variable: "--font-jp",
+const body = IBM_Plex_Sans({
+  variable: "--font-body",
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  weight: ["400", "500", "600"],
 });
 
-const mono = JetBrains_Mono({
-  variable: "--font-mono",
+const code = JetBrains_Mono({
+  variable: "--font-code",
   subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "AIRAA Research Agent",
-  description: "AI research agent for Web3: live market, DeFi and on-chain data in one conversation.",
+  description: "AI research agent for Web3: live market, DeFi, on-chain and news data in one conversation.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#070b14",
 };
 
 export default function RootLayout({
@@ -31,7 +37,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${display.variable} ${jp.variable} ${mono.variable} antialiased`}>
+      <body className={`${heading.variable} ${body.variable} ${code.variable} antialiased`}>
         <Providers>
           {children}
         </Providers>

@@ -51,7 +51,7 @@ const connectors = connectorsForWallets(
     },
   ],
   {
-    appName: "My RainbowKit App",
+    appName: "AIRAA",
     projectId: "YOUR_PROJECT_ID",
   }
 );
@@ -65,8 +65,8 @@ export default function Providers(props: {
   const [queryClient] = useState(() => new QueryClient());
 
 const selectedTheme = darkTheme({
-    accentColor: "rgb(55 65 81)", // Dark grey with black hue
-    accentColorForeground: "white",
+    accentColor: "#22d3ee",
+    accentColorForeground: "#03161c",
     borderRadius: "medium",
     fontStack: "system",
     overlayBlur: "small",

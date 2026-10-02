@@ -2,16 +2,17 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import { FileDown, FileSpreadsheet, FileText, Clock, Copy, Check, Square, ArrowUp, ChevronDown, Sparkles, Plus } from 'lucide-react';
+import { Clock, Copy, Check, Square, ArrowUp, ChevronDown, Plus } from 'lucide-react';
 import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
 import Markdown from '../components/Markdown';
+import Logo from '../components/Logo';
+import WalletButton from '../components/WalletButton';
 import { LiveActivity, ActivitySummary } from '../components/AgentActivity';
 import { API_BASE, streamResearch, type AgentEvent, type ChartSpec, type ToolProgress } from '../../lib/api';
+import { splitAnswer } from '../../lib/answer';
 import AgentCharts from '../components/AgentCharts';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
 
 
@@ -44,11 +45,19 @@ interface ResearchResult {
 }
 
 const SUGGESTIONS = [
-  'Chart ETH vs SOL over the last 30 days',
-  'Why is the crypto market moving today?',
-  'Best stablecoin yields right now',
-  'Aave TVL history and fees',
+  { tag: 'DeFi', text: 'Which DEXs lead on Arbitrum today, and how are their fees?' },
+  { tag: 'Yields', text: 'Best stablecoin yields right now?' },
+  { tag: 'Charts', text: 'Chart ETH vs SOL over the last 30 days' },
+  { tag: 'News', text: 'Why is the crypto market moving today?' },
 ];
+
+const TIME_RANGES = [
+  ['1d', '24 hours'],
+  ['7d', '7 days'],
+  ['30d', '30 days'],
+  ['90d', '90 days'],
+  ['1y', '1 year'],
+] as const;
 
 interface LiveRun {
   stage: string;
@@ -59,13 +68,6 @@ interface LiveRun {
   charts: ChartSpec[];
 }
 
-interface ApiStats {
-  totalQueries: number;
-  successfulQueries: number;
-  avgResponseTime: number;
-  isOnline: boolean;
-}
-
 type ChatRole = 'user' | 'assistant' | 'system';
 
 interface ChatMessage {
@@ -74,13 +76,6 @@ interface ChatMessage {
   text?: string;
   timestamp: string;
   result?: ResearchResult; // When assistant returns structured data
-}
-
-interface ConversationSession {
-  session_id: string;
-  message_count: number;
-  created_at: string;
-  last_activity: string;
 }
 
 interface ConversationHistory {
@@ -97,50 +92,26 @@ interface ConversationHistory {
   last_activity: string;
 }
 
+const SECONDARY_BTN =
+  'inline-flex min-h-11 sm:min-h-10 items-center justify-center gap-1.5 rounded-[10px] border border-line-strong bg-transparent px-3 text-[13px] text-ink-3 transition-colors hover:border-white/30 hover:text-ink touch-manipulation';
+
 export default function MainChat() {
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress } = useAccount();
   const [query, setQuery] = useState('');
   const [address, setAddress] = useState('');
   const [timeRange, setTimeRange] = useState('7d');
   const [loading, setLoading] = useState(false);
-  
-  // Session management state
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [conversationHistory, setConversationHistory] = useState<ConversationHistory | null>(null);
-  const [showSessionInfo, setShowSessionInfo] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      text: 'Hi! I\'m your AIRAA Research Agent. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.',
-      timestamp: new Date().toISOString(),
-    },
-  ]);
-  const [apiStats, setApiStats] = useState<ApiStats>({
-    totalQueries: 0,
-    successfulQueries: 0,
-    avgResponseTime: 0,
-    isOnline: false,
-  });
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [live, setLive] = useState<LiveRun | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endOfChatRef = useRef<HTMLDivElement>(null);
-  const hasUserMessage = messages.some((m) => m.role === 'user');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const hasConversation = messages.length > 0;
   const [vizConfigs, setVizConfigs] = useState<Record<string, VisualizationConfig>>({});
   const [openViz, setOpenViz] = useState<Record<string, boolean>>({});
-
-  const latestAssistantMsg = messages
-    .slice()
-    .reverse()
-    .find(m => m.role === 'assistant' && m.result && m.result.success && m.result.data);
-
-
-
-
 
   // Check API health on component mount
   useEffect(() => {
@@ -155,114 +126,66 @@ export default function MainChat() {
 
   // Auto-scroll to the newest message
   useEffect(() => {
-    endOfChatRef.current?.scrollIntoView({ behavior: 'smooth' });
+    endOfChatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, loading]);
+
+  // Grow the composer with its content, up to max-height
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [query]);
 
   // Initialize or restore session
   const initializeSession = () => {
-    // Check if there's a session in localStorage
-    const storedSessionId = localStorage.getItem('airaa-session-id');
+    let storedSessionId: string | null = null;
+    try {
+      storedSessionId = localStorage.getItem('airaa-session-id');
+    } catch {
+      /* storage unavailable */
+    }
     if (storedSessionId) {
-      console.log(`Restoring session: ${storedSessionId}`);
       setSessionId(storedSessionId);
-      // Load conversation history with a small delay to ensure state is set
-      setTimeout(() => loadConversationHistory(storedSessionId, false, true), 500);
+      loadConversationHistory(storedSessionId);
     } else {
-      // Generate new session ID
-      const newSessionId = `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      console.log(`Creating new session: ${newSessionId}`);
-      setSessionId(newSessionId);
-      localStorage.setItem('airaa-session-id', newSessionId);
+      persistSession(newSessionId());
     }
   };
 
-  // Load conversation history from backend
-  const loadConversationHistory = async (sessionId: string, showLoading: boolean = true, replaceMessages: boolean = true) => {
-    if (showLoading) setLoadingHistory(true);
-    
+  const newSessionId = () => `web-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+
+  const persistSession = (id: string) => {
+    setSessionId(id);
     try {
-      const response = await fetch(`${API_BASE}/api/conversation/${sessionId}`);
-      if (response.ok) {
-        const history: ConversationHistory = await response.json();
-        setConversationHistory(history);
-        
-        // Only replace messages if explicitly requested (e.g., on initial load)
-        if (replaceMessages && history.messages && history.messages.length > 0) {
-          // Keep the welcome message and add restored conversation
-          const restoredMessages: ChatMessage[] = history.messages.map((msg, index) => {
-            if (msg.type === 'human') {
-              return {
-                id: `restored-${sessionId}-${index}`,
-                role: 'user' as ChatRole,
-                text: msg.content,
-                timestamp: msg.timestamp,
-              };
-            } else {
-              // For AI messages, use research_data if available, otherwise treat as greeting
-              let aiText = msg.content;
-              let result: ResearchResult | undefined = undefined;
+      localStorage.setItem('airaa-session-id', id);
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
-              if (msg.research_data) {
-                // Use the stored research data to recreate the full result
-                result = {
-                  ...msg.research_data,
-                  timestamp: msg.timestamp,
-                  session_id: sessionId
-                };
-                
-                // Check if this is a greeting response (no API calls, greeting intent)
-                const isGreeting = result.success && 
-                                  result.query_intent === 'greeting' && 
-                                  (!result.data_sources_used || result.data_sources_used.length === 0);
-                
-                if (!isGreeting) {
-                  aiText = 'Here are the insights I found. You can explore the visualization below or download the data.';
-                }
-              } else {
-                // No research data available - this is likely a greeting or simple response
-                result = undefined;
-              }
+  // Restore an earlier conversation from the backend
+  const loadConversationHistory = async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/conversation/${id}`);
+      if (!response.ok) return; // 404 means a new session
+      const history: ConversationHistory = await response.json();
+      if (!history.messages?.length) return;
 
-              return {
-                id: `restored-${sessionId}-${index}`,
-                role: 'assistant' as ChatRole,
-                text: aiText,
-                timestamp: msg.timestamp,
-                result: result
-              };
-            }
-          });
-          
-          // Replace messages with welcome + restored conversation
-          setMessages([
-            {
-              id: 'welcome-restored',
-              role: 'assistant',
-              text: `Hi! I\'m your AIRAA Research Agent. I found our previous conversation with ${Math.floor(history.messages.length / 2)} exchanges. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.`,
-              timestamp: new Date().toISOString(),
-            },
-            ...restoredMessages
-          ]);
-          
-          console.log(`Restored ${history.messages.length} messages from session ${sessionId}`);
-          console.log('Restored messages:', restoredMessages.map(m => ({ role: m.role, text: m.text?.slice(0, 50) + '...' })));
-        } else if (replaceMessages && (!history.messages || history.messages.length === 0)) {
-          // No previous messages, just update welcome message
-          setMessages([{
-            id: 'welcome',
-            role: 'assistant',
-            text: 'Hi! I\'m your AIRAA Research Agent. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.',
-            timestamp: new Date().toISOString(),
-          }]);
-        }
-      } else if (response.status === 404) {
-        // Session not found, that's okay for new sessions
-        console.log(`Session ${sessionId} not found - this is a new session`);
-      }
+      setMessages(history.messages.map((msg, index) => {
+        const base = { id: `restored-${id}-${index}`, timestamp: msg.timestamp };
+        if (msg.type === 'human') return { ...base, role: 'user' as ChatRole, text: msg.content };
+
+        const result: ResearchResult | undefined = msg.research_data
+          ? { ...msg.research_data, timestamp: msg.timestamp, session_id: id }
+          : undefined;
+        // Greetings carry no research data, so render them as plain chat
+        const isGreeting = !!result && result.success && result.query_intent === 'greeting' &&
+          (!result.data_sources_used || result.data_sources_used.length === 0);
+        return { ...base, role: 'assistant' as ChatRole, text: msg.content, result: isGreeting ? undefined : result };
+      }));
     } catch (error) {
       console.warn('Could not load conversation history:', error);
-    } finally {
-      if (showLoading) setLoadingHistory(false);
     }
   };
 
@@ -270,33 +193,19 @@ export default function MainChat() {
     try {
       const response = await fetch(`${API_BASE}/api/health`);
       const data = await response.json();
-      setApiStats(prev => ({ ...prev, isOnline: data.status === 'ok' }));
+      setIsOnline(data.status === 'ok');
     } catch (error) {
-      setApiStats(prev => ({ ...prev, isOnline: false }));
+      setIsOnline(false);
     }
   };
 
   // Start new conversation session
   const startNewSession = () => {
-    const newSessionId = `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    setSessionId(newSessionId);
-    localStorage.setItem('airaa-session-id', newSessionId);
-    setConversationHistory(null);
-    
-    // Clear current conversation (keep only welcome message)
-    setMessages([{
-      id: 'welcome',
-      role: 'assistant',
-      text: 'Hi! I\'m your AIRAA Research Agent. I have conversation memory - I\'ll remember our previous discussions! Ask me anything about Web3, DeFi, or on-chain analytics.',
-      timestamp: new Date().toISOString(),
-    }]);
-  };
-
-  // Refresh conversation history
-  const refreshConversationHistory = (showLoading: boolean = true, replaceMessages: boolean = false) => {
-    if (sessionId) {
-      loadConversationHistory(sessionId, showLoading, replaceMessages);
-    }
+    abortRef.current?.abort();
+    persistSession(newSessionId());
+    setMessages([]);
+    setOpenViz({});
+    inputRef.current?.focus();
   };
 
   const stopGenerating = () => abortRef.current?.abort();
@@ -326,7 +235,6 @@ export default function MainChat() {
 
     setLoading(true);
     setLive({ stage: 'Starting…', tools: [], draft: '', charts: [] });
-    const startTime = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -390,12 +298,8 @@ export default function MainChat() {
       if (!finalResult) throw new Error(streamError || 'The agent ended without returning a result');
 
       const data = finalResult;
-      const responseTime = Date.now() - startTime;
 
-      if (data.session_id && data.session_id !== sessionId) {
-        setSessionId(data.session_id);
-        localStorage.setItem('airaa-session-id', data.session_id);
-      }
+      if (data.session_id && data.session_id !== sessionId) persistSession(data.session_id);
 
       const normalized: ResearchResult = {
         ...data,
@@ -421,25 +325,7 @@ export default function MainChat() {
         timestamp: new Date().toISOString(),
         result: isGreeting ? undefined : normalized,
       }]);
-
-      setApiStats(prev => ({
-        totalQueries: prev.totalQueries + 1,
-        successfulQueries: prev.successfulQueries + (data.success ? 1 : 0),
-        avgResponseTime:
-          (prev.avgResponseTime * prev.totalQueries + responseTime) /
-          (prev.totalQueries + 1),
-        isOnline: true,
-      }));
-
-      // Refresh session metadata only; messages are already on screen
-      if (data.success && sessionId) {
-        setTimeout(() => {
-          fetch(`${API_BASE}/api/conversation/${sessionId}`)
-            .then(response => response.json())
-            .then((history: ConversationHistory) => setConversationHistory(history))
-            .catch(error => console.warn('Could not update conversation history:', error));
-        }, 1000);
-      }
+      setIsOnline(true);
     } catch (error: any) {
       const aborted = error?.name === 'AbortError';
       const message = aborted
@@ -457,7 +343,7 @@ export default function MainChat() {
           query: trimmed,
         },
       }]);
-      if (!aborted) setApiStats(prev => ({ ...prev, isOnline: false }));
+      if (!aborted) setIsOnline(false);
     } finally {
       abortRef.current = null;
       setLive(null);
@@ -580,13 +466,13 @@ export default function MainChat() {
     // Helper function to add text with word wrap
     const addText = (text: string, fontSize = 12, fontStyle: 'normal' | 'bold' = 'normal') => {
       if (!text) return;
-      
+
       pdf.setFontSize(fontSize);
       pdf.setFont('helvetica', fontStyle);
       const lines = pdf.splitTextToSize(text.toString(), pageWidth - 2 * margin);
       pdf.text(lines, margin, yPosition);
       yPosition += lines.length * (fontSize * 0.4) + 5;
-      
+
       // Check if we need a new page
       if (yPosition > pdf.internal.pageSize.getHeight() - margin) {
         pdf.addPage();
@@ -613,7 +499,7 @@ export default function MainChat() {
     const aiResponse = res.result || res.data;
     if (aiResponse) {
       addText('AI Analysis & Insights', 16, 'bold');
-      
+
       // Handle both string and object responses
       if (typeof aiResponse === 'string') {
         addText(aiResponse, 11);
@@ -659,14 +545,14 @@ export default function MainChat() {
         addText('Structured Data Summary', 16, 'bold');
         const flatData = flattenObjectForExcel(res.merged_data);
         const dataEntries = Object.entries(flatData).slice(0, 20); // Limit to first 20 entries
-        
+
         if (dataEntries.length > 0) {
           dataEntries.forEach(([key, value]) => {
             const displayKey = key.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim();
             const displayValue = Array.isArray(value) ? value.join(', ') : String(value);
             addText(`${displayKey}: ${displayValue.slice(0, 100)}${displayValue.length > 100 ? '...' : ''}`, 10);
           });
-          
+
           if (Object.keys(flatData).length > 20) {
             addText('... and more data available in structured format', 10);
           }
@@ -682,11 +568,11 @@ export default function MainChat() {
 
   const flattenObjectForExcel = (obj: any, prefix = ''): Record<string, any> => {
     let flattened: Record<string, any> = {};
-    
+
     for (const key in obj) {
       if (obj.hasOwnProperty(key)) {
         const newKey = prefix ? `${prefix}_${key}` : key;
-        
+
         if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
           Object.assign(flattened, flattenObjectForExcel(obj[key], newKey));
         } else if (Array.isArray(obj[key])) {
@@ -696,214 +582,207 @@ export default function MainChat() {
         }
       }
     }
-    
+
     return flattened;
   };
 
-  const flattenObject = (obj: any, prefix = ''): Record<string, any> => {
-    let flattened: Record<string, any> = {};
-    
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        const newKey = prefix ? `${prefix}.${key}` : key;
-        
-        if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-          Object.assign(flattened, flattenObject(obj[key], newKey));
-        } else {
-          flattened[newKey] = obj[key];
-        }
-      }
-    }
-    
-    return flattened;
-  };
+  const renderAssistant = (m: ChatMessage) => {
+    const res = m.result;
+    const failed = !!res && !res.success;
+    const canExport = !!res && res.success && !!(res.data || res.result || res.merged_data);
+    const hasStructured = !!res?.success && !!res.merged_data && typeof res.merged_data === 'object' && Object.keys(res.merged_data).length > 0;
+    const parts = m.text && !failed ? splitAnswer(m.text) : null;
 
+    return (
+      <article className="flex flex-col gap-4">
+        {res?.success && <AgentCharts charts={res.charts} />}
 
+        {failed ? (
+          <div className="rounded-xl border border-red-400/30 bg-red-500/[0.08] px-3.5 py-3 text-sm text-red-200" role="alert">
+            {m.text}
+          </div>
+        ) : parts && (
+          <div>
+            <Markdown>{parts.body}</Markdown>
+            {parts.next.length > 0 && (
+              <>
+                <h3 className="mb-2 mt-[22px] font-display text-base font-semibold text-ink sm:text-[17px]">Next questions</h3>
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  {parts.next.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => handleSend(q)}
+                      disabled={loading}
+                      className="min-h-11 rounded-xl border border-line-strong bg-transparent px-3.5 text-left text-sm text-ink-3 transition-colors hover:border-accent/50 hover:bg-accent/[0.06] hover:text-ink disabled:opacity-50 sm:min-h-10 sm:rounded-full touch-manipulation"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {parts.footer.length > 0 && (
+              <div className="mt-5 border-t border-white/[0.08] pt-3 text-xs italic text-muted sm:text-[13px]">
+                {parts.footer.map((line) => <p key={line} className="m-0">{line}</p>)}
+              </div>
+            )}
+          </div>
+        )}
 
-  // Removed URL query parameter handling
+        {res?.success && (
+          <ActivitySummary trace={res.tool_trace} steps={res.reasoning_steps} seconds={res.execution_time} planner={res.planner} />
+        )}
 
-  return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-[#070b14] text-white"
-      style={{ backgroundImage: 'radial-gradient(60rem 30rem at 50% -10%, rgba(14,165,233,0.12), transparent 60%)' }}>
-      {/* Header */}
-      <header className="shrink-0 border-b border-white/[0.07] bg-[#070b14]/80 backdrop-blur-md">
-        <div className="mx-auto flex h-14 w-full max-w-3xl items-center gap-3 px-3 sm:px-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-400/15 text-cyan-300">
-              <Sparkles className="h-4 w-4" />
-            </span>
-            <h1 className="text-base font-semibold tracking-tight">AIRAA</h1>
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${apiStats.isOnline ? 'bg-emerald-400' : 'bg-white/25'}`}
-              title={apiStats.isOnline ? 'Agent online' : 'Agent offline'}
+        {(canExport || (!res && m.text)) && (
+          <div className="flex gap-2 sm:flex-wrap">
+            {hasStructured && (
+              <button
+                type="button"
+                onClick={() => setOpenViz(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
+                aria-expanded={!!openViz[m.id]}
+                className={`${SECONDARY_BTN} hidden sm:inline-flex`}
+              >
+                Explore the data
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${openViz[m.id] ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </button>
+            )}
+            {m.text && (
+              <button type="button" onClick={() => copyMessage(m.id, m.text!)} className={`${SECONDARY_BTN} flex-1 sm:flex-none`}>
+                {copiedId === m.id ? <Check className="h-3.5 w-3.5 text-ok" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                {copiedId === m.id ? 'Copied' : 'Copy'}
+              </button>
+            )}
+            {canExport && (
+              <>
+                <button type="button" onClick={() => downloadResult(res!, 'pdf')} className={`${SECONDARY_BTN} flex-1 sm:flex-none`}>
+                  <span className="sm:hidden">PDF</span><span className="hidden sm:inline">Export PDF</span>
+                </button>
+                <button type="button" onClick={() => downloadResult(res!, 'excel')} className={`${SECONDARY_BTN} hidden sm:inline-flex`}>Excel</button>
+                <button type="button" onClick={() => downloadResult(res!, 'json')} className={`${SECONDARY_BTN} flex-1 sm:flex-none`}>
+                  <span className="sm:hidden">Data</span><span className="hidden sm:inline">JSON</span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {hasStructured && openViz[m.id] && (
+          <div className="hidden rounded-xl border border-line bg-black/20 p-2 sm:block sm:p-3">
+            <DataVisualization
+              data={res!.merged_data}
+              title="Research Data"
+              config={vizConfigs[m.id]}
+              onConfigChange={(cfg) => setVizConfigs(prev => ({ ...prev, [m.id]: cfg }))}
             />
           </div>
+        )}
+      </article>
+    );
+  };
+
+  const statusLabel = isOnline === null ? 'Connecting' : isOnline ? 'Online' : 'Offline';
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-[15px] leading-[1.6] text-ink">
+      {/* Header */}
+      <header className="shrink-0 border-b border-white/[0.07]">
+        <div className="mx-auto flex h-14 w-full max-w-[820px] items-center gap-3 px-4 sm:h-[60px]">
+          <Logo />
+          <span className="inline-flex items-center gap-1.5 text-xs text-subtle" title={`Agent ${statusLabel.toLowerCase()}`}>
+            <span className={`h-[7px] w-[7px] rounded-full ${isOnline ? 'bg-ok' : isOnline === false ? 'bg-danger' : 'bg-white/25'}`} />
+            <span className="hidden sm:inline">{statusLabel}</span>
+            <span className="sr-only sm:hidden">{statusLabel}</span>
+          </span>
           <div className="ml-auto flex items-center gap-2">
-            {hasUserMessage && (
+            {hasConversation && (
               <button
+                type="button"
                 onClick={startNewSession}
-                className="flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs text-white/70 transition hover:border-white/40 hover:text-white touch-manipulation"
-                title="Start a new conversation"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-[10px] border border-line-strong text-sm font-medium text-ink-3 transition-colors hover:border-white/30 hover:text-ink sm:h-auto sm:min-h-10 sm:w-auto sm:px-3 touch-manipulation"
+                aria-label="New chat"
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="h-[18px] w-[18px] sm:hidden" aria-hidden="true" />
                 <span className="hidden sm:inline">New chat</span>
               </button>
             )}
-            <ConnectButton showBalance={false} chainStatus="icon" accountStatus={{ smallScreen: 'avatar', largeScreen: 'address' }} />
+            <WalletButton />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-3 sm:px-4">
-          {/* Messages */}
-          <div
-            className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4 pr-1"
-            id="chat-scroll"
-            aria-live="polite"
-          >
-            {messages.map((m) => {
-              const isUser = m.role === 'user';
-              const res = m.result;
-              const canExport = !!res && res.success && !!(res.data || res.result || res.merged_data);
-              const hasStructured = !!res?.success && !!res.merged_data && typeof res.merged_data === 'object' && Object.keys(res.merged_data).length > 0;
-
-              return (
-                <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`group relative ${
-                      isUser
-                        ? 'max-w-[85%] rounded-2xl rounded-br-md bg-cyan-400/[0.12] px-4 py-2.5'
-                        : 'w-full'
-                    }`}
-                  >
-                    {!isUser && m.text && (
-                      <button
-                        onClick={() => copyMessage(m.id, m.text!)}
-                        className="absolute -top-1 right-0 rounded p-1 text-white/35 transition hover:bg-white/10 hover:text-white sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
-                        aria-label="Copy answer"
-                        title="Copy answer"
-                      >
-                        {copiedId === m.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                      </button>
-                    )}
-
-                    {m.text && (isUser
-                      ? <div className="whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px]">{m.text}</div>
-                      : res && !res.success
-                        ? <div className="text-sm text-red-200">{m.text}</div>
-                        : <Markdown>{m.text}</Markdown>
-                    )}
-
-                    {res && (
-                      <div className="mt-3 space-y-3">
-                        {!res.success && res.error && (
-                          <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-red-400/30 bg-red-900/10 p-3 text-xs text-red-300">{res.error}</pre>
-                        )}
-
-                        {res.success && <AgentCharts charts={res.charts} />}
-
-                        {res.success && (
-                          <ActivitySummary
-                            trace={res.tool_trace}
-                            steps={res.reasoning_steps}
-                            sources={res.data_sources_used}
-                            seconds={res.execution_time}
-                            planner={res.planner}
-                          />
-                        )}
-
-                        {hasStructured && (
-                          <div className="rounded-xl border border-white/10 bg-black/20">
-                            <button
-                              onClick={() => setOpenViz(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-white/60 hover:text-white/80"
-                              aria-expanded={!!openViz[m.id]}
-                            >
-                              <span className="font-medium text-white/80">Explore the data</span>
-                              <span>· tables, charts, raw JSON</span>
-                              <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${openViz[m.id] ? 'rotate-180' : ''}`} />
-                            </button>
-                            {openViz[m.id] && (
-                              <div className="border-t border-white/10 p-2 sm:p-3">
-                                <DataVisualization
-                                  data={res.merged_data}
-                                  title="Research Data"
-                                  config={vizConfigs[m.id]}
-                                  onConfigChange={(cfg) => setVizConfigs(prev => ({ ...prev, [m.id]: cfg }))}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {canExport && (
-                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                            {([
-                              ['json', 'JSON', FileDown],
-                              ['excel', 'Excel', FileSpreadsheet],
-                              ['pdf', 'PDF', FileText],
-                            ] as const).map(([fmt, label, Icon]) => (
-                              <button
-                                key={fmt}
-                                onClick={() => downloadResult(res, fmt)}
-                                className="flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1.5 text-xs text-white/70 transition-colors hover:border-white/50 hover:text-white touch-manipulation"
-                              >
-                                <Icon className="h-3.5 w-3.5" />
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {!hasUserMessage && !loading && (
-              <div className="pt-2">
-                <div className="mb-2 flex items-center gap-1.5 text-xs text-white/50">
-                  <Sparkles className="h-3.5 w-3.5 text-cyan-300" />
-                  Try asking
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => handleSend(s)}
-                      className="rounded-full border border-white/20 bg-white/[0.04] px-3 py-1.5 text-xs sm:text-sm text-white/75 transition-colors hover:border-cyan-300/50 hover:bg-cyan-300/10 hover:text-white touch-manipulation"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+      <main className="min-h-0 flex-1 overflow-y-auto" id="chat-scroll">
+        {!hasConversation && !loading ? (
+          <div className="mx-auto flex max-w-[820px] flex-col gap-7 px-4 pb-6 pt-10 sm:pt-[72px]">
+            <div>
+              <h1 className="m-0 font-display text-[28px] font-semibold leading-tight tracking-[-0.6px] sm:text-[34px]">
+                What do you want to research?
+              </h1>
+              <p className="mt-2.5 max-w-[560px] text-muted">
+                Prices, DeFi metrics, news, links and wallets. Every answer shows its sources, and charts come from the fetched numbers.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s.text}
+                  type="button"
+                  onClick={() => handleSend(s.text)}
+                  className="flex min-w-0 flex-col gap-1.5 rounded-[14px] border border-white/10 bg-surface px-[18px] py-4 text-left text-ink transition-colors hover:border-accent/40 hover:bg-[#101a2b] touch-manipulation"
+                >
+                  <span className="text-xs font-medium text-accent">{s.tag}</span>
+                  <span className="font-medium">{s.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-[820px] flex-col gap-[22px] px-4 py-[18px] sm:py-7" aria-live="polite">
+            {messages.map((m) => m.role === 'user' ? (
+              <div key={m.id} className="max-w-[88%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-accent/[0.12] px-3.5 py-2.5 sm:max-w-[85%] sm:px-4">
+                {m.text}
               </div>
-            )}
+            ) : (
+              <div key={m.id}>{renderAssistant(m)}</div>
+            ))}
 
             {loading && live && (
-              <div className="flex justify-start">
-                <div className="w-full space-y-3">
-                  <LiveActivity stage={live.stage} planner={live.planner} rationale={live.rationale} tools={live.tools} />
-                  <AgentCharts charts={live.charts} />
-                  {live.draft && <Markdown>{live.draft}</Markdown>}
-                </div>
+              <div className="flex flex-col gap-4 sm:gap-[22px]">
+                <LiveActivity stage={live.stage} planner={live.planner} rationale={live.rationale} tools={live.tools} />
+                <AgentCharts charts={live.charts} />
+                {live.draft && <Markdown streaming>{live.draft}</Markdown>}
               </div>
             )}
 
             <div ref={endOfChatRef} />
           </div>
+        )}
+      </main>
 
-          {/* Composer */}
-          <div className="shrink-0 pb-3 pt-2 sm:pb-4">
-            <div className="rounded-2xl border border-white/[0.12] bg-white/[0.05] p-2 transition-colors focus-within:border-cyan-300/40 focus-within:bg-white/[0.07]">
+      {/* Composer */}
+      <footer className="shrink-0">
+        <form
+          className="mx-auto max-w-[820px] px-3 pb-3.5 pt-2 sm:px-4 sm:pb-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
+          }}
+        >
+          <div
+            className={`rounded-2xl border bg-surface p-1.5 pl-3 transition-colors focus-within:border-accent/45 sm:rounded-[18px] sm:p-2.5 sm:pb-2 ${
+              hasConversation ? 'border-white/[0.12]' : 'border-accent/35'
+            }`}
+          >
+            <div className="flex items-end gap-2 sm:block">
+              <label htmlFor="composer" className="sr-only">Your question</label>
               <textarea
+                id="composer"
+                ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                rows={1}
-                placeholder="Ask about a token, protocol, wallet or market…"
-                aria-label="Message"
-                className="max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm text-white placeholder-white/35 focus:outline-none sm:text-base"
+                rows={hasConversation ? 1 : 2}
+                placeholder={hasConversation ? 'Ask a follow-up…' : 'Ask about a token, protocol, wallet, link or market…'}
+                className="max-h-40 min-h-11 w-full flex-1 resize-none border-0 bg-transparent py-2.5 text-base text-ink placeholder:text-subtle focus:outline-none sm:px-2 sm:py-1.5"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
@@ -911,58 +790,60 @@ export default function MainChat() {
                   }
                 }}
               />
-              <div className="flex items-center gap-2 pt-1">
-                <label className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-white/55 transition hover:bg-white/[0.06] hover:text-white/80">
-                  <Clock className="h-3.5 w-3.5" />
-                  <select
-                    value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value)}
-                    className="cursor-pointer bg-transparent focus:outline-none"
-                    aria-label="Time range"
-                  >
-                    <option className="bg-slate-900" value="1d">24 hours</option>
-                    <option className="bg-slate-900" value="7d">7 days</option>
-                    <option className="bg-slate-900" value="30d">30 days</option>
-                    <option className="bg-slate-900" value="90d">90 days</option>
-                    <option className="bg-slate-900" value="1y">1 year</option>
-                  </select>
-                </label>
-                {!address && (
-                  <span className="hidden text-[11px] text-white/35 sm:inline">Connect a wallet for on-chain analysis</span>
-                )}
-                {address && (
-                  <span className="hidden items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[11px] text-white/40 sm:flex" title={address}>
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-                    {address.slice(0, 6)}…{address.slice(-4)}
-                  </span>
-                )}
-                {loading ? (
-                  <button
-                    onClick={stopGenerating}
-                    className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-red-400/40 bg-red-500/10 text-red-200 transition hover:bg-red-500/20 touch-manipulation"
-                    aria-label="Stop"
-                    title="Stop"
-                  >
-                    <Square className="h-4 w-4 fill-current" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleSend()}
-                    disabled={!query.trim()}
-                    className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-400 text-slate-900 transition hover:bg-cyan-300 active:scale-95 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30 touch-manipulation"
-                    aria-label="Send"
-                    title="Send (Enter)"
-                  >
-                    <ArrowUp className="h-5 w-5" />
-                  </button>
-                )}
-              </div>
+              <div className="sm:hidden">{renderSendButton()}</div>
             </div>
-            <div className="mt-1.5 text-center text-[11px] text-white/30">
-              AI-generated research, not financial advice
+            <div className="hidden items-center gap-2 sm:flex">
+              <label className="inline-flex min-h-9 items-center gap-1.5 rounded-[9px] bg-white/[0.05] px-2.5 text-[13px] text-muted">
+                <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                <select
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value)}
+                  className="cursor-pointer border-0 bg-transparent text-ink-3 focus:outline-none"
+                  aria-label="Time range"
+                >
+                  {TIME_RANGES.map(([value, label]) => (
+                    <option key={value} className="bg-surface" value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              {!loading && (address ? (
+                <span className="inline-flex items-center gap-1.5 font-mono text-xs text-subtle" title={address}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-ok/70" />
+                  {address.slice(0, 6)}…{address.slice(-4)}
+                </span>
+              ) : (
+                <span className="text-xs text-subtle">Connect a wallet for on-chain questions</span>
+              ))}
+              <div className="ml-auto">{renderSendButton()}</div>
             </div>
           </div>
-      </main>
+          <p className="mt-2 hidden text-center text-xs text-subtle sm:block">AI-generated research, not financial advice.</p>
+        </form>
+      </footer>
     </div>
   );
+
+  function renderSendButton() {
+    return loading ? (
+      <button
+        type="button"
+        onClick={stopGenerating}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-400/45 bg-red-400/[0.12] text-red-300 transition-colors hover:bg-red-400/20 touch-manipulation"
+        aria-label="Stop"
+        title="Stop"
+      >
+        <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+      </button>
+    ) : (
+      <button
+        type="submit"
+        disabled={!query.trim()}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent transition-colors hover:bg-accent-hover active:scale-95 disabled:cursor-not-allowed disabled:bg-white/[0.08] disabled:text-subtle touch-manipulation"
+        aria-label="Send"
+        title="Send (Enter)"
+      >
+        <ArrowUp className="h-5 w-5" strokeWidth={2.4} aria-hidden="true" />
+      </button>
+    );
+  }
 }
