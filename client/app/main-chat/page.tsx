@@ -634,7 +634,7 @@ export default function MainChat() {
           <ActivitySummary trace={res.tool_trace} steps={res.reasoning_steps} seconds={res.execution_time} planner={res.planner} />
         )}
 
-        {(canExport || (!res && m.text)) && (
+        {canExport && (
           <div className="flex gap-2 sm:flex-wrap">
             {hasStructured && (
               <button
