@@ -14,6 +14,10 @@ const AXIS_TICK = { fill: '#5b616e', fontSize: 11 };
 const VALUE_LABEL = { fill: '#0b0d12', fontSize: 11, fontWeight: 700 };
 /** Bars carry value labels instead of a y-axis up to this many categories. */
 const MAX_LABELLED_BARS = 8;
+/** Ranked bar charts show at most this many rows, and go horizontal past HORIZONTAL_FROM categories. */
+const MAX_BARS = 8;
+const HORIZONTAL_FROM = 5;
+const ROW_PX = 34;
 
 function compactUsd(v: number) {
   const abs = Math.abs(v);
@@ -78,7 +82,7 @@ const tooltip = (fmt: (v: unknown) => string, cursor: object) => (
   />
 );
 
-function barChart({ spec, color, horizontal }: { spec: ChartSpec; color: (i: number) => string; horizontal: boolean }) {
+function barChart({ spec, color, horizontal, narrow }: { spec: ChartSpec; color: (i: number) => string; horizontal: boolean; narrow: boolean }) {
   const fmt = formatter(spec.y_format, false);
   const tip = tooltip(exact(spec.y_format, false), { fill: 'rgba(11,13,18,0.05)' });
   const multi = spec.series.length > 1;
@@ -88,12 +92,12 @@ function barChart({ spec, color, horizontal }: { spec: ChartSpec; color: (i: num
     return (
       <BarChart data={spec.data} layout="vertical" margin={{ top: 0, right: labelled ? 52 : 8, bottom: 0, left: 0 }} barCategoryGap={6}>
         <XAxis type="number" hide />
-        <YAxis type="category" dataKey={spec.x_key} width={104} tickFormatter={tickLabel(15)}
+        <YAxis type="category" dataKey={spec.x_key} width={narrow ? 104 : 150} tickFormatter={tickLabel(narrow ? 15 : 22)}
           tick={{ ...AXIS_TICK, fill: '#2a2e37', fontSize: 12 }} tickLine={false} axisLine={false} interval={0} />
         {tip}
         {multi && <Legend wrapperStyle={{ fontSize: 12, color: '#2a2e37' }} />}
         {spec.series.map((s, i) => (
-          <Bar key={s.key} dataKey={s.key} name={s.label} fill={color(i)} radius={[0, 3, 3, 0]} maxBarSize={14}>
+          <Bar key={s.key} dataKey={s.key} name={s.label} fill={color(i)} radius={[0, 6, 6, 0]} maxBarSize={18}>
             {labelled && <LabelList dataKey={s.key} position="right" formatter={fmt} style={VALUE_LABEL} />}
           </Bar>
         ))}
@@ -165,26 +169,27 @@ function seriesChart({ spec, color }: { spec: ChartSpec; color: (i: number) => s
   );
 }
 
-function ChartCard({ spec, index, wide, narrow }: { spec: ChartSpec; index: number; wide: boolean; narrow: boolean }) {
+function ChartCard({ spec, index, narrow }: { spec: ChartSpec; index: number; narrow: boolean }) {
   // One series: ink on the pastel tile. Several: one colour per series.
   const color = (i: number) => COLORS[(spec.series.length > 1 ? i : 0) % COLORS.length];
-  const horizontal = spec.kind === 'bar' && narrow;
-  const height = horizontal ? Math.max(120, spec.data.length * 24 + 8) : 208;
+  const shown = spec.kind === 'bar' ? { ...spec, data: spec.data.slice(0, MAX_BARS) } : spec;
+  const horizontal = shown.kind === 'bar' && (narrow || shown.data.length > HORIZONTAL_FROM);
+  const height = horizontal ? Math.max(120, shown.data.length * ROW_PX + 8) : 208;
 
   return (
     <figure
-      className={`anim-rise m-0 min-w-0 rounded-3xl p-4 sm:p-[22px] ${wide ? 'md:col-span-2' : ''}`}
+      className={`anim-rise m-0 min-w-0 rounded-3xl p-4 sm:p-[22px] `}
       style={{ background: TILES[index % TILES.length], animationDelay: `${index * 80}ms` }}
     >
-      <figcaption className="mb-3 flex flex-col gap-0.5 sm:mb-4 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+      <figcaption className="mb-3 flex flex-col gap-0.5 sm:mb-4">
         <span className="font-display text-base font-bold text-ink sm:text-lg">{spec.title}</span>
-        {spec.subtitle && <span className="truncate text-xs text-ink-3/70">{spec.subtitle}</span>}
+        {spec.subtitle && <span className="text-xs text-ink-3/70">{spec.subtitle}</span>}
       </figcaption>
       <div className="w-full" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
           {/* Called, not mounted as components: ResponsiveContainer must hand its width/height straight to the chart element. */}
           {spec.kind === 'bar'
-            ? barChart({ spec, color, horizontal })
+            ? barChart({ spec: shown, color, horizontal, narrow })
             : seriesChart({ spec, color })}
         </ResponsiveContainer>
       </div>
@@ -197,9 +202,9 @@ export default function AgentCharts({ charts }: { charts?: ChartSpec[] }) {
   const narrow = useNarrow();
   if (!charts?.length) return null;
   return (
-    <div className={`grid gap-3 ${charts.length > 1 ? 'md:grid-cols-2' : ''}`}>
+    <div className="grid gap-3">
       {charts.map((spec, i) => (
-        <ChartCard key={spec.id} spec={spec} index={i} narrow={narrow} wide={charts.length % 2 === 1 && charts.length > 1 && i === 0} />
+        <ChartCard key={spec.id} spec={spec} index={i} narrow={narrow} />
       ))}
     </div>
   );
