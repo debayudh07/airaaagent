@@ -3,6 +3,13 @@ flask>=3.0,<4
 flask-cors>=4.0.1,<7
 gunicorn>=22.0
 
+# Persistence (Supabase Postgres). Optional at runtime: no DATABASE_URL = in-memory sessions.
+psycopg[binary,pool]>=3.2,<4
+
+# Wallet sign-in (SIWE): signature recovery + access tokens
+eth-account>=0.13,<1
+pyjwt>=2.8,<3
+
 # HTTP + config
 httpx>=0.27,<1
 python-dotenv>=1.0

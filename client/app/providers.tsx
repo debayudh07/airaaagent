@@ -30,6 +30,7 @@ import {
 // import { useTheme } from "next-themes";
 
 import { getConfig } from "./wagmi";
+import AuthProvider from "./components/AuthProvider";
 
 coinbaseWallet.preference = "smartWalletOnly";
 
@@ -84,7 +85,7 @@ const selectedTheme = lightTheme({
           coolMode
           modalSize="wide"
         >
-              {props.children}
+              <AuthProvider>{props.children}</AuthProvider>
           
         </RainbowKitProvider>
         

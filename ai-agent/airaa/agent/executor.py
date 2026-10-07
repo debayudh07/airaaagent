@@ -68,12 +68,21 @@ def _is_transient(result: Dict[str, Any]) -> bool:
     return any(marker in error for marker in _TRANSIENT_MARKERS)
 
 
-async def _run_one(name: str, args: Dict[str, Any], settings: Settings, on_event: EventCallback) -> Dict[str, Any]:
+async def _run_one(name: str, args: Dict[str, Any], settings: Settings, on_event: EventCallback,
+                   cache: Optional[Any] = None) -> Dict[str, Any]:
     tool = TOOLS[name]
     await emit(on_event, {"type": "tool_start", "tool": name})
     started = time.perf_counter()
     attempts = 0
     result: Dict[str, Any] = {"success": False, "error": "not run"}
+
+    ticket = None
+    if cache is not None:
+        hit, ticket = await cache.lookup(name, args)
+        if hit is not None:
+            cached = dict(hit["result"])
+            cached["cached"] = {"age_seconds": hit["age_seconds"], "match": hit["match"], "similarity": hit["similarity"]}
+            return await _finish(name, cached, started, 0, on_event)
 
     for attempt in range(settings.tool_retries + 1):
         attempts = attempt + 1
@@ -92,6 +101,12 @@ async def _run_one(name: str, args: Dict[str, Any], settings: Settings, on_event
         await emit(on_event, {"type": "tool_retry", "tool": name, "error": result.get("error")})
         await asyncio.sleep(0.8 * (attempt + 1))
 
+    if cache is not None and result.get("success"):
+        await cache.store(ticket, result)
+    return await _finish(name, result, started, attempts, on_event)
+
+
+async def _finish(name: str, result: Dict[str, Any], started: float, attempts: int, on_event: EventCallback) -> Dict[str, Any]:
     duration_ms = int((time.perf_counter() - started) * 1000)
     result.setdefault("source", name.replace("_tool", ""))
     result.update({"tool": name, "duration_ms": duration_ms, "attempts": attempts})
@@ -100,6 +115,7 @@ async def _run_one(name: str, args: Dict[str, Any], settings: Settings, on_event
         "tool": name,
         "success": bool(result.get("success")),
         "duration_ms": duration_ms,
+        "cached": bool(result.get("cached")),
         "error": None if result.get("success") else result.get("error"),
     })
     return result
@@ -111,8 +127,11 @@ async def run_tools(
     entities: Entities,
     on_event: EventCallback = None,
     settings: Optional[Settings] = None,
+    cache: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
-    """Run each named tool concurrently and return their result dicts in plan order."""
+    """Run each named tool concurrently and return their result dicts in plan order.
+
+    ``cache`` (a :class:`airaa.cache.ToolCache`) serves fresh results for public tools without calling them."""
     settings = settings or get_settings()
     jobs = []
     for name in dict.fromkeys(names):
@@ -120,5 +139,5 @@ async def run_tools(
         if args is None:
             logger.warning("Skipping %s: unknown tool or missing arguments", name)
             continue
-        jobs.append(_run_one(name, args, settings, on_event))
+        jobs.append(_run_one(name, args, settings, on_event, cache))
     return list(await asyncio.gather(*jobs)) if jobs else []

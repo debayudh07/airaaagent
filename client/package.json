@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:crypto": "node --experimental-strip-types --no-warnings --test tests/vault-crypto.test.mts"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.8",

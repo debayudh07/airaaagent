@@ -2,16 +2,22 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { useAccount } from 'wagmi';
-import { Clock, Copy, Check, Square, ArrowUp, ChevronDown, Plus } from 'lucide-react';
+import { Clock, Copy, Check, Square, ArrowUp, ChevronDown, Plus, Lock, Share2 } from 'lucide-react';
 import { Mark } from '../components/Logo';
 import { TIME_RANGES } from '../components/AskBox';
 import DataVisualization, { type VisualizationConfig } from '../components/DataVisualization';
 import Markdown from '../components/Markdown';
 import Logo from '../components/Logo';
 import WalletButton from '../components/WalletButton';
+import ChatHistory from '../components/ChatHistory';
+import { useAuth } from '../components/AuthProvider';
+import { useVault } from '../components/useVault';
 import { LiveActivity, ActivitySummary } from '../components/AgentActivity';
 import { API_BASE, streamResearch, type AgentEvent, type ChartSpec, type ToolProgress } from '../../lib/api';
+import { apiFetch } from '../../lib/auth';
+import { sealFile, shareConversation, text as vaultText } from '../../lib/vault';
 import { splitAnswer } from '../../lib/answer';
 import AgentCharts from '../components/AgentCharts';
 import jsPDF from 'jspdf';
@@ -44,6 +50,8 @@ interface ResearchResult {
   tool_trace?: Array<{ tool: string; success: boolean; duration_ms?: number; error?: string | null }>;
   planner?: string;
   charts?: ChartSpec[];
+  personalization?: { memories?: number; watchlist?: number; snapshots?: number; documents?: number };
+  knowledge_sources?: Array<{ title: string; url: string }>;
 }
 
 const SUGGESTIONS = [
@@ -94,6 +102,10 @@ const SECONDARY_BTN =
 
 export default function MainChat() {
   const { address: connectedAddress } = useAccount();
+  const auth = useAuth();
+  const vault = useVault();
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; href?: string } | null>(null);
+  const lastAuthStatus = useRef(auth.status);
   const [query, setQuery] = useState('');
   const [address, setAddress] = useState('');
   const [timeRange, setTimeRange] = useState('7d');
@@ -139,6 +151,25 @@ export default function MainChat() {
       handleSend(q);
     }
   }, [sessionId]);
+
+  // Signing in: the conversation in use becomes the wallet's. Signing out: wallet conversations are private, so start fresh.
+  useEffect(() => {
+    const previous = lastAuthStatus.current;
+    lastAuthStatus.current = auth.status;
+    if (auth.status === 'signed-in' && previous !== 'signed-in' && sessionId) {
+      apiFetch('/api/conversations/claim', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) }).catch(() => undefined);
+    }
+    if (auth.status === 'guest' && previous === 'signed-in') {
+      persistSession(newSessionId());
+      setMessages([]);
+    }
+  }, [auth.status]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 7000);
+    return () => clearTimeout(id);
+  }, [notice]);
 
   // Sync connected wallet address
   useEffect(() => {
@@ -188,7 +219,7 @@ export default function MainChat() {
   // Restore an earlier conversation from the backend
   const loadConversationHistory = async (id: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/conversation/${id}`);
+      const response = await apiFetch(`/api/conversation/${id}`);
       if (!response.ok) return; // 404 means a new session
       const history: ConversationHistory = await response.json();
       if (!history.messages?.length) return;
@@ -230,6 +261,44 @@ export default function MainChat() {
   };
 
   const stopGenerating = () => abortRef.current?.abort();
+
+  const openConversation = (id: string) => {
+    abortRef.current?.abort();
+    persistSession(id);
+    setMessages([]);
+    setOpenViz({});
+    loadConversationHistory(id);
+  };
+
+  const saveToVault = async (m: ChatMessage) => {
+    const question = [...messages].reverse().find((x) => x.role === 'user' && x.timestamp <= m.timestamp)?.text ?? 'Research answer';
+    try {
+      if (!vault.unlocked) {
+        setNotice({ ok: true, text: 'Confirm in your wallet to unlock the vault…' });
+        await vault.unlockWithWallet();
+      }
+      const slug = question.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'answer';
+      await sealFile(vaultText.encode(`# ${question}\n\n${m.text ?? ''}\n`), { title: question.slice(0, 80), name: `${slug}.md`, mime: 'text/markdown' });
+      setNotice({ ok: true, text: 'Saved to your encrypted vault.', href: '/vault' });
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setNotice(/no signature key|has no|not initialized|Not found/i.test(msg)
+        ? { ok: false, text: 'Set up your vault first.', href: '/vault' }
+        : { ok: false, text: msg.length > 160 ? `${msg.slice(0, 160)}…` : msg, href: '/vault' });
+    }
+  };
+
+  const shareChat = async () => {
+    if (!sessionId) return;
+    try {
+      await apiFetch('/api/conversations/claim', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) }).catch(() => undefined);
+      const url = await shareConversation(sessionId, true);
+      try { await navigator.clipboard.writeText(url); } catch { /* clipboard blocked: the notice still shows the outcome */ }
+      setNotice({ ok: true, text: 'Link copied. Anyone with it can read this chat (the underlying data is hidden). Manage links in your vault.', href: '/vault' });
+    } catch (e: any) {
+      setNotice({ ok: false, text: String(e?.message ?? e) });
+    }
+  };
 
   const copyMessage = async (id: string, text: string) => {
     try {
@@ -655,6 +724,23 @@ export default function MainChat() {
                 {parts.footer.map((line) => <p key={line} className="m-0">{line}</p>)}
               </div>
             )}
+            {res?.knowledge_sources && res.knowledge_sources.length > 0 && (
+              <p className="m-0 mt-3 text-[13px] text-muted">
+                Docs used:{' '}
+                {res.knowledge_sources.map((k, i) => (
+                  <span key={k.url}>{i > 0 && ', '}<a href={k.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-ink-3 underline">{k.title}</a></span>
+                ))}
+              </p>
+            )}
+            {res?.personalization && Object.values(res.personalization).some((n) => (n ?? 0) > 0) && (
+              <p className="m-0 mt-1 text-[13px] text-muted">
+                Personalised with {[
+                  res.personalization.memories ? `${res.personalization.memories} saved ${res.personalization.memories === 1 ? 'note' : 'notes'}` : '',
+                  res.personalization.watchlist ? 'your watchlist' : '',
+                  res.personalization.snapshots ? 'your portfolio snapshot' : '',
+                ].filter(Boolean).join(', ') || 'what I know about you'}. <Link href="/memory" className="font-semibold text-ink-3 underline">Manage</Link>
+              </p>
+            )}
           </div>
         )}
 
@@ -667,6 +753,11 @@ export default function MainChat() {
             <button type="button" onClick={() => downloadResult(res!, 'pdf')} className={SECONDARY_BTN}>Export PDF</button>
             <button type="button" onClick={() => downloadResult(res!, 'excel')} className={`${SECONDARY_BTN} hidden sm:inline-flex`}>Excel</button>
             <button type="button" onClick={() => downloadResult(res!, 'json')} className={SECONDARY_BTN}>JSON</button>
+            {auth.status === 'signed-in' && (
+              <button type="button" onClick={() => saveToVault(m)} className={SECONDARY_BTN} title="Encrypt this answer in your browser and save it to your vault">
+                <Lock className="h-3.5 w-3.5" aria-hidden="true" />Save to vault
+              </button>
+            )}
             {hasStructured && (
               <button
                 type="button"
@@ -737,6 +828,13 @@ export default function MainChat() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bg text-[15px] leading-[1.55] text-ink">
+      {notice && (
+        <div role="status" className={`fixed bottom-28 left-1/2 z-30 flex max-w-[min(32rem,calc(100vw-1.5rem))] -translate-x-1/2 items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold shadow-xl ${notice.ok ? 'bg-ink text-white' : 'bg-[#ffe4e1] text-[#a3231a]'}`}>
+          <span>{notice.text}</span>
+          {notice.href && <Link href={notice.href} className="shrink-0 underline">Open vault</Link>}
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
       <header className="shrink-0 border-b border-line-2">
         <div className="mx-auto flex max-w-[1360px] items-center gap-3 px-3 py-2 sm:gap-3.5 sm:px-6 sm:py-3">
           <Logo />
@@ -747,6 +845,18 @@ export default function MainChat() {
             <span className="sr-only">{statusLabel}</span>
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {auth.status === 'signed-in' && <ChatHistory activeId={sessionId} onSelect={openConversation} />}
+            {auth.status === 'signed-in' && hasConversation && (
+              <button
+                type="button"
+                onClick={shareChat}
+                className="inline-flex h-11 w-11 items-center justify-center gap-1.5 rounded-full bg-field text-sm font-semibold text-ink transition-colors hover:bg-field-hover sm:w-auto sm:px-4 touch-manipulation"
+                aria-label="Share this chat"
+              >
+                <Share2 className="h-[18px] w-[18px] sm:h-4 sm:w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            )}
             {hasConversation && (
               <button
                 type="button"

@@ -16,8 +16,16 @@ from airaa.schemas import FollowUp, Plan
 @pytest.fixture(autouse=True)
 def _offline_env(monkeypatch):
     """Never let a developer's real keys leak into tests."""
-    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "COINMARKETCAP_API_KEY", "ETHERSCAN_API_KEY", "DUNE_API_KEY", "ADMIN_TOKEN"):
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "COINMARKETCAP_API_KEY", "ETHERSCAN_API_KEY", "DUNE_API_KEY", "ADMIN_TOKEN",
+                 "DATABASE_URL", "AIRAA_JWT_SECRET", "SUPABASE_JWT_SECRET", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
+                 "AIRAA_CRON_SECRET", "ALLOWED_ORIGINS", "AIRAA_SIWE_DOMAINS"):
         monkeypatch.delenv(name, raising=False)
+    from airaa import services as _services
+    from airaa.db import pool as _pool
+
+    _services.reset_services()
+    monkeypatch.setattr(_pool, "_pool", None)
+    monkeypatch.setattr(_pool, "_failed", False)
 
 
 @pytest.fixture

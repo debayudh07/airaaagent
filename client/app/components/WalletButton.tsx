@@ -2,6 +2,7 @@
 
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Wallet } from 'lucide-react';
+import AccountMenu from './AccountMenu';
 
 const BASE =
   'inline-flex min-h-11 items-center justify-center gap-2 rounded-full border-[1.5px] border-ink bg-white px-4 text-sm font-semibold text-ink transition-colors hover:bg-field touch-manipulation';
@@ -9,6 +10,8 @@ const BASE =
 /** Wallet control: "Connect wallet", or the short address once connected. */
 export default function WalletButton() {
   return (
+    <div className="flex items-center gap-2">
+    <AccountMenu />
     <ConnectButton.Custom>
       {({ account, chain, mounted, openAccountModal, openChainModal, openConnectModal }) => {
         const connected = mounted && account && chain;
@@ -32,5 +35,6 @@ export default function WalletButton() {
         );
       }}
     </ConnectButton.Custom>
+    </div>
   );
 }

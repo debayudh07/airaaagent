@@ -1,0 +1,6 @@
+// Intentionally has no models. The schema is the hand-written SQL in ./migrations, applied with `prisma migrate deploy`
+// (it uses pgvector, row-level security, SQL functions and generated columns, none of which Prisma models).
+// The Python backend talks to the database directly, so no Prisma Client is generated.
+datasource db {
+  provider = "postgresql"
+}

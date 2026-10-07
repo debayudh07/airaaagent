@@ -22,4 +22,16 @@ services:
         sync: false
       - key: ADMIN_TOKEN
         sync: false
-
+      # Persistence + wallet features (all optional; see ai-agent/.env.example)
+      - key: DATABASE_URL
+        sync: false
+      - key: AIRAA_JWT_SECRET
+        sync: false
+      - key: AIRAA_SIWE_DOMAINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: AIRAA_CRON_SECRET
+        sync: false

@@ -368,3 +368,23 @@ See the main README.md for contribution guidelines.
 ---
 
 Built with ❤️ for the Web3 community using cutting-edge frontend technologies.
+## Wallet accounts (optional)
+
+When the backend has `DATABASE_URL` and `AIRAA_JWT_SECRET` set, the header shows **Sign in** once a wallet is connected.
+Signing in (EIP-4361, free, no transaction) unlocks:
+
+| Page | What it does |
+|---|---|
+| `/main-chat` | conversation history, answers personalised with your memory and watchlist, **Save to vault**, **Share** |
+| `/memory` | see, edit, pin and delete what the agent remembers; watchlist; on-chain portfolio snapshot; export or erase your data |
+| `/vault` | files encrypted in the browser (AES-256-GCM): set-up with a one-time recovery key, unlock by wallet signature, passphrase or recovery key, share by link |
+| `/alerts` | scheduled research and an inbox of results |
+| `/s/<token>` | public viewer for a share link; sealed files are decrypted here with the key in the URL `#fragment` |
+
+Without those backend settings none of this appears and the app behaves as a guest-only chat.
+
+- The access token is kept in memory only; the refresh token is an httpOnly cookie. For production the backend must list this
+  site in `ALLOWED_ORIGINS` (cross-site cookies need explicit origins).
+- All encryption lives in `lib/vaultCrypto.ts` (pure WebCrypto). `npm run test:crypto` runs its tests on Node's WebCrypto.
+- If a smart-contract wallet signs differently each time, the vault cannot be unlocked by signature; the passphrase and
+  recovery key exist for that case. Keep the recovery key: nobody, including us, can recover the files without a working key.

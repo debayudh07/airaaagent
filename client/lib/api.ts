@@ -1,6 +1,7 @@
-export const API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL || 'https://airaaagent.onrender.com'
-).replace(/\/$/, '');
+import { getAccessToken, refreshSession } from './auth';
+import { API_BASE } from './config';
+
+export { API_BASE };
 
 export type ToolStatus = 'running' | 'done' | 'failed';
 
@@ -110,12 +111,14 @@ export async function streamResearch(
   onEvent: (event: AgentEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/research/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const open = async () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = await getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;   // signed in: the conversation belongs to the wallet
+    return fetch(`${API_BASE}/api/research/stream`, { method: 'POST', headers, body: JSON.stringify(body), signal });
+  };
+  let response = await open();
+  if (response.status === 401 && (await refreshSession())) response = await open();
 
   if (!response.ok || !response.body) {
     let detail = `HTTP ${response.status}`;

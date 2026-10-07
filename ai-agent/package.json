@@ -1,0 +1,14 @@
+{
+  "name": "airaa-db",
+  "private": true,
+  "description": "Prisma tooling for the AIRAA database schema (SQL in prisma/migrations). The backend itself is Python.",
+  "scripts": {
+    "db:deploy": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
+    "db:validate": "prisma validate"
+  },
+  "devDependencies": {
+    "dotenv": "^17.0.0",
+    "prisma": "7.10.0"
+  }
+}

@@ -9,3 +9,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Prisma tooling deps (ai-agent/package.json)
+ai-agent/node_modules/

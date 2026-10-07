@@ -1,0 +1,25 @@
+# Runs due alert rules (scheduled research) by calling the backend's cron hook.
+# Needs repository secrets/variables:
+#   secret   AIRAA_CRON_SECRET   same value as the backend's AIRAA_CRON_SECRET
+#   variable BACKEND_URL         e.g. https://airaaagent.onrender.com   (defaults to that)
+# GitHub may delay scheduled runs by several minutes; alert intervals are >= 15 minutes, so that is fine.
+# Alternative without GitHub: any scheduler that can POST with the X-Cron-Secret header (Cloudflare cron, cron-job.org).
+name: run alerts
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger due alerts
+        env:
+          URL: ${{ vars.BACKEND_URL || 'https://airaaagent.onrender.com' }}
+          SECRET: ${{ secrets.AIRAA_CRON_SECRET }}
+        run: |
+          test -n "$SECRET" || { echo "AIRAA_CRON_SECRET is not set"; exit 1; }
+          curl --fail --silent --show-error --max-time 90 -X POST -H "X-Cron-Secret: $SECRET" "$URL/api/internal/alerts/run"

@@ -9,6 +9,23 @@ from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv())
 
 
+# Query parameters that only Prisma understands. libpq (psycopg) rejects unknown ones, so a URL shared with Prisma,
+# e.g. ".../postgres?pgbouncer=true", must be cleaned before it is used here.
+_PRISMA_ONLY_PARAMS = {"pgbouncer", "connection_limit", "pool_timeout", "schema", "statement_cache_size", "socket_timeout"}
+
+
+def normalize_database_url(url: str) -> str:
+    """Drop Prisma-only query parameters so the same DATABASE_URL works for both Prisma and psycopg."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    url = (url or "").strip()
+    if "?" not in url:
+        return url
+    parts = urlsplit(url)
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in _PRISMA_ONLY_PARAMS]
+    return urlunsplit(parts._replace(query=urlencode(kept)))
+
+
 def _float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, default))
@@ -60,6 +77,45 @@ class Settings:
     # --- Sessions / API -------------------------------------------------
     max_sessions: int = field(default_factory=lambda: _int("AIRAA_MAX_SESSIONS", 200))
     session_ttl_hours: int = field(default_factory=lambda: _int("AIRAA_SESSION_TTL_HOURS", 24))
+    # Postgres/Supabase connection string (use the pooler URL on Render). Empty = in-memory sessions only.
+    database_url: str = field(default_factory=lambda: normalize_database_url(os.getenv("DATABASE_URL", "")))
+    db_pool_size: int = field(default_factory=lambda: _int("AIRAA_DB_POOL_SIZE", 5))
+    # --- Wallet auth (SIWE) ---------------------------------------------
+    # HS256 secret for access tokens. Use the Supabase project's JWT secret to make the same token valid for
+    # Supabase RLS. Empty disables wallet sign-in. Must be at least 32 characters.
+    jwt_secret: str = field(default_factory=lambda: os.getenv("AIRAA_JWT_SECRET") or os.getenv("SUPABASE_JWT_SECRET", ""))
+    access_token_ttl_seconds: int = field(default_factory=lambda: _int("AIRAA_ACCESS_TOKEN_TTL_SECONDS", 900))
+    refresh_token_ttl_days: int = field(default_factory=lambda: _int("AIRAA_REFRESH_TOKEN_TTL_DAYS", 30))
+    # Hosts (host[:port]) a SIWE message may name as its domain. Defaults to the hosts in ALLOWED_ORIGINS.
+    siwe_domains: tuple = field(default_factory=lambda: _list("AIRAA_SIWE_DOMAINS", ""))
+    # JSON object {"<chainId>": "<rpc url>"} overriding the built-in public RPCs used for EIP-1271 checks.
+    rpc_urls_json: str = field(default_factory=lambda: os.getenv("AIRAA_RPC_URLS", ""))
+
+    # --- Embeddings & retrieval ----------------------------------------
+    embedding_model: str = field(default_factory=lambda: os.getenv("AIRAA_EMBEDDING_MODEL", "gemini-embedding-001"))
+    embedding_dim: int = 768  # fixed by the vector(768) columns in prisma/migrations/
+    memory_top_k: int = field(default_factory=lambda: _int("AIRAA_MEMORY_TOP_K", 5))
+    memory_min_similarity: float = field(default_factory=lambda: _float("AIRAA_MEMORY_MIN_SIMILARITY", 0.45))
+    memory_dedup_similarity: float = field(default_factory=lambda: _float("AIRAA_MEMORY_DEDUP_SIMILARITY", 0.92))
+    memory_half_life_days: float = field(default_factory=lambda: _float("AIRAA_MEMORY_HALF_LIFE_DAYS", 30))
+    kb_top_k: int = field(default_factory=lambda: _int("AIRAA_KB_TOP_K", 4))
+    kb_min_similarity: float = field(default_factory=lambda: _float("AIRAA_KB_MIN_SIMILARITY", 0.5))
+    cache_enabled: bool = field(default_factory=lambda: os.getenv("AIRAA_CACHE_ENABLED", "1") != "0")
+    cache_similarity: float = field(default_factory=lambda: _float("AIRAA_CACHE_SIMILARITY", 0.95))
+    max_watchlist_items: int = field(default_factory=lambda: _int("AIRAA_MAX_WATCHLIST", 50))
+
+    # --- Sealed storage (Supabase Storage holds ciphertext only) --------
+    supabase_url: str = field(default_factory=lambda: os.getenv("SUPABASE_URL", "").rstrip("/"))
+    supabase_service_key: str = field(default_factory=lambda: os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""))
+    storage_bucket: str = field(default_factory=lambda: os.getenv("AIRAA_STORAGE_BUCKET", "sealed"))
+    max_artifact_bytes: int = field(default_factory=lambda: _int("AIRAA_MAX_ARTIFACT_BYTES", 10 * 1024 * 1024))
+
+    # --- Scheduled research (alerts) -----------------------------------
+    cron_secret: str = field(default_factory=lambda: os.getenv("AIRAA_CRON_SECRET", ""))
+    max_alert_rules: int = field(default_factory=lambda: _int("AIRAA_MAX_ALERT_RULES", 10))
+    max_alert_runs_per_day: int = field(default_factory=lambda: _int("AIRAA_MAX_ALERT_RUNS_PER_DAY", 24))
+    alert_batch_size: int = field(default_factory=lambda: _int("AIRAA_ALERT_BATCH_SIZE", 5))
+
     allowed_origins: str = field(default_factory=lambda: os.getenv("ALLOWED_ORIGINS", "*"))
     rate_limit_per_minute: int = field(default_factory=lambda: _int("AIRAA_RATE_LIMIT_PER_MINUTE", 20))
     max_query_chars: int = field(default_factory=lambda: _int("AIRAA_MAX_QUERY_CHARS", 1000))

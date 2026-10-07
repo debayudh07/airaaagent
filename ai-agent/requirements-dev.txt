@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=8.0
+# Embedded Postgres + pgvector for tests/integration (skipped automatically if absent)
+pgserver>=0.1.4

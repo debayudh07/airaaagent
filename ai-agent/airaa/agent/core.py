@@ -29,6 +29,7 @@ from .planner import Planner
 from .prompts import SYNTHESIS_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+_UNSET: Any = object()   # "use the process-wide default", as opposed to an explicit None ("feature off")
 
 SOURCE_LABELS = {
     "coinmarketcap": "CoinMarketCap", "coingecko": "CoinGecko", "defillama": "DefiLlama",
@@ -63,8 +64,18 @@ class Web3ResearchAgent:
         settings: Optional[Settings] = None,
         planner_llm: Any = None,
         synthesis_model: Any = None,
+        retrieval: Any = _UNSET,
+        cache: Any = _UNSET,
     ) -> None:
         self.settings = settings or get_settings()
+        if retrieval is _UNSET or cache is _UNSET:
+            from ..services import get_services
+
+            defaults = get_services()
+            retrieval = defaults.retrieval if retrieval is _UNSET else retrieval
+            cache = defaults.cache if cache is _UNSET else cache
+        self.retrieval = retrieval   # airaa.retrieval.Retrieval | None
+        self.cache = cache           # airaa.cache.ToolCache | None
         self.sessions = sessions or get_session_manager()
         self.session = self.sessions.get_or_create(session_id)
         self.session_id: str = self.session["id"]
@@ -102,6 +113,7 @@ class Web3ResearchAgent:
 
     # ------------------------------------------------------------------ pipeline
     async def _research(self, request: ResearchRequest, on_event: EventCallback, started: float, steps: List[str]) -> Dict[str, Any]:
+        retrieved = await self._retrieve(request, on_event)
         await emit(on_event, {"type": "status", "stage": "planning", "message": "Planning which data sources to query"})
         planned = await self.planner.plan(request)
         plan: Plan = planned["plan"]
@@ -118,7 +130,7 @@ class Web3ResearchAgent:
         trace: List[Dict[str, Any]] = []
         if plan.tools:
             await emit(on_event, {"type": "status", "stage": "gathering", "message": "Gathering data"})
-            results = await run_tools(plan.tools, request, plan.entities, on_event, self.settings)
+            results = await run_tools(plan.tools, request, plan.entities, on_event, self.settings, cache=self.cache)
             merged = merge_results(results)
             trace.extend(self._trace(results, round_no=1))
             steps.append(f"Ran {len(results)} tool(s): " + ", ".join(
@@ -161,6 +173,10 @@ class Web3ResearchAgent:
             "data_quality_score": score, "tool_trace": trace, "planner": planned["planner"],
             "execution_time": elapsed, "charts": charts,
         }
+        if retrieved is not None and any(retrieved.used.values()):
+            research_data["personalization"] = retrieved.used
+        if retrieved is not None and retrieved.citations:
+            research_data["knowledge_sources"] = retrieved.citations
         self._remember(request, final, research_data)
         return {**research_data, "degraded": degraded, "session_id": self.session_id,
                 "models": {"planner": planned.get("model") or self.settings.planner_model,
@@ -185,7 +201,7 @@ class Web3ResearchAgent:
         steps.append(f"Follow-up round: {', '.join(tools)} ({decision.reason or 'filling gaps'})")
         await emit(on_event, {"type": "status", "stage": "gathering", "message": "Filling gaps in the data"})
         await emit(on_event, {"type": "followup", "tools": tools, "reason": decision.reason})
-        return await run_tools(tools, request, entities, on_event, self.settings) or None
+        return await run_tools(tools, request, entities, on_event, self.settings, cache=self.cache) or None
 
     @staticmethod
     def _worth_reflecting(results: List[Dict[str, Any]], merged: Dict[str, Any]) -> bool:
@@ -206,6 +222,8 @@ class Web3ResearchAgent:
                 f"QUESTION: {request.query}\n\nNo live data was retrieved because none was needed. Answer conceptual "
                 "questions from general knowledge, and do not state any prices, TVL, APYs, volumes or other live figures."
             )
+        if request.retrieval_blocks:
+            context += "\n\n" + request.retrieval_blocks
         messages = [SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT)]
         messages += self.sessions.recent_messages(self.session_id, self.settings.history_messages)
         messages.append(HumanMessage(content=context))
@@ -240,6 +258,18 @@ class Web3ResearchAgent:
             for r in results
         ]
 
+    async def _retrieve(self, request: ResearchRequest, on_event: EventCallback):
+        """Memories, watchlist/portfolio and knowledge-base passages for this question. Never raises."""
+        if self.retrieval is None:
+            return None
+        retrieved = await self.retrieval.build(request)
+        request.user_context = retrieved.summary
+        request.retrieval_blocks = retrieved.blocks
+        if any(retrieved.used.values()):
+            await emit(on_event, {"type": "status", "stage": "recalling", "message": "Using what I know about you and the docs",
+                                  "used": retrieved.used})
+        return retrieved
+
     def _remember(self, request: ResearchRequest, answer: str, research_data: Dict[str, Any]) -> None:
         now = datetime.now().isoformat()
         user = HumanMessage(content=request.query, additional_kwargs={"timestamp": now})
@@ -250,6 +280,8 @@ class Web3ResearchAgent:
             "query_intent": research_data["query_intent"],
             "data_sources": research_data["data_sources_used"],
         })
+        if self.retrieval is not None and request.store_memory and research_data.get("query_intent") != "greeting":
+            self.retrieval.remember(request, answer, self.planner._model)
 
     def _greeting(self, request: ResearchRequest, started: float) -> Dict[str, Any]:
         reply = get_greeting_response(request.query, self.session)

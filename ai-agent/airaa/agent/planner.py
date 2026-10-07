@@ -75,7 +75,8 @@ class Planner:
             f"Wallet address provided by user: {request.address or 'none'}\n"
             f"Time range: {request.time_range}\n"
             f"Recent conversation:\n{history or '(none)'}\n\n"
-            f"Latest question: {request.query}"
+            + (f"What is known about this user:\n{request.user_context}\n\n" if request.user_context else "")
+            + f"Latest question: {request.query}"
         )
         result = await structured.ainvoke([SystemMessage(content=PLANNER_SYSTEM_PROMPT), HumanMessage(content=user)])
         if isinstance(result, dict):

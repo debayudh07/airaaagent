@@ -24,6 +24,14 @@ class ResearchRequest:
     time_range: str = "7d"
     session_id: Optional[str] = None
     data_sources: List[str] = field(default_factory=lambda: ["dune", "etherscan", "coinmarketcap", "defillama"])
+    # Set by the API layer from the verified wallet session, never from the request body.
+    wallet_id: Optional[str] = None
+    wallet_address: Optional[str] = None
+    memory_enabled: bool = True     # may recall long-term memory / personalise
+    store_memory: bool = True       # may write long-term memory (off for automated alert runs)
+    # Filled by the agent from retrieval: a short version for the planner, full blocks for the answer.
+    user_context: str = ""
+    retrieval_blocks: str = ""
 
     def __post_init__(self) -> None:
         if not self.session_id:
