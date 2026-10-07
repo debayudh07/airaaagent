@@ -79,7 +79,7 @@ def test_empty_llm_plan_falls_back(settings, sessions):
 def test_empty_llm_plan_is_honoured_for_conceptual_questions(settings, sessions):
     """"What is impermanent loss?" needs no live data; the rules' catch-all market quote must not override the model."""
     llm = FakePlannerLLM(plan=Plan(intent="general", tools=[]))
-    for question in ("what is impermanent loss", "explain how gas fees work", "what does a liquid staking token do"):
+    for question in ("what is impermanent loss", "explain what a liquid staking token is", "how does proof of stake work"):
         out = run(make(settings, sessions, llm).plan(req(question)))
         assert out["planner"] == "llm" and out["plan"].tools == [], question
 

@@ -484,6 +484,7 @@ _NOISE = [
 ]
 _FOOTER = re.compile(r"\n-{3,}\n\*?Sources:")
 _NEXT_Q = re.compile(r"(?im)^[\s#*_>-]*next questions?\b.*$")
+_LIST_ITEM = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s")
 
 
 @dataclass
@@ -498,7 +499,12 @@ def clean_answer(text: str, drop_follow_ups: bool = True) -> str:
     text = _FOOTER.split(text)[0]
     if drop_follow_ups:
         m = _NEXT_Q.search(text)
-        text = text[:m.start()] if m else text
+        if m:
+            # The follow-up questions may mention figures ("30 days"), so list items and questions are exempt. Anything else
+            # placed after the heading is still the model's own claim, and is checked: a heading is not a hiding place.
+            tail = [line for line in text[m.end():].splitlines()
+                    if line.strip() and not _LIST_ITEM.match(line) and not line.strip().endswith("?")]
+            text = text[:m.start()] + "\n" + "\n".join(tail)
     for pattern in _NOISE:
         text = pattern.sub(" ", text)
     return text
@@ -596,6 +602,7 @@ GROUNDING_FAKES = [  # (answer, expected number of unsupported figures)
     ("Price $64,321.12, but its TVL is $50 billion.", 1),
     ("Market cap is $2.4 trillion and supply is 21,000,000.", 2),
     ("The 24h change is +1.50% but the 7d change is -9.80%.", 1),
+    ("Bitcoin is at $64,321.12.\n\nNext questions\n1. And SOL?\nThe all-time high was $73,000 and volume is $45 billion.", 2),   # a heading is not a hiding place
 ]
 
 
