@@ -367,6 +367,9 @@ export default function MainChat() {
         case 'token':
           setLive(prev => prev && { ...prev, draft: prev.draft + event.text });
           break;
+        case 'reset':
+          setLive(prev => prev && { ...prev, draft: '' });
+          break;
         case 'result':
           finalResult = event.result;
           break;

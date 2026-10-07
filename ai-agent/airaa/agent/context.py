@@ -264,11 +264,34 @@ def build_context(request: ResearchRequest, plan: Plan, merged: Dict[str, Any], 
     return "\n".join(parts)
 
 
+def _user_facing(text: str) -> str:
+    """Remove the prompt-only fences that mark third-party text for the model; a reader should not see them."""
+    kept = [line for line in text.splitlines() if not line.startswith(("<<<UNTRUSTED WEB CONTENT", "<<<END UNTRUSTED WEB CONTENT"))]
+    return "\n".join(kept)
+
+
+def _docs_section(passages: List[Dict[str, Any]]) -> str:
+    seen, lines = set(), []
+    for p in passages:
+        if p["url"] in seen:
+            continue
+        seen.add(p["url"])
+        excerpt = " ".join(p["content"].split())
+        lines.append(f"- [{p['title']}]({p['url']}): {excerpt[:420]}{'…' if len(excerpt) > 420 else ''}")
+    return "**From the documentation:**\n" + "\n".join(lines) if lines else ""
+
+
 def plain_summary(request: ResearchRequest, plan: Plan, merged: Dict[str, Any]) -> str:
-    """Readable data-only answer used when the language model is unavailable."""
+    """Readable data-only answer used when the language model is unavailable: the retrieved data plus any matching docs."""
     context = build_context(request, plan, merged)
     body = context.split("=== VERIFIED DATA (the only facts you may use) ===", 1)[-1].split("=== UNAVAILABLE SOURCES ===")[0]
-    return (
-        "The AI summary is temporarily unavailable, so here is the data I retrieved for your question:\n\n"
-        + body.strip()
-    )
+    body = _user_facing(body).strip()
+    if "(no data was retrieved)" in body and request.kb_passages:
+        body = ""   # nothing came back from the data sources; the documentation below is the useful part
+    parts = ["The AI summary is temporarily unavailable, so here is what I retrieved for your question:"]
+    if body:
+        parts.append(body)
+    docs = _docs_section(request.kb_passages)
+    if docs:
+        parts.append(docs)
+    return "\n\n".join(parts)

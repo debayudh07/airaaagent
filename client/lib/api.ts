@@ -32,6 +32,7 @@ export type AgentEvent =
   | { type: 'tool_end'; tool: string; success: boolean; duration_ms: number; error?: string | null }
   | { type: 'chart'; chart: ChartSpec }
   | { type: 'token'; text: string }
+  | { type: 'reset' } // a model failed mid-answer; discard the draft so far, the next model starts over
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: string };
 

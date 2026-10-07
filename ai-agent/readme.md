@@ -181,7 +181,7 @@ Request body for both research endpoints:
 `session_id` is 8-100 chars of letters, digits, `-`, `_`. Invalid input gets a 400, and more than
 `AIRAA_RATE_LIMIT_PER_MINUTE` research requests per client per minute gets a 429 with `Retry-After`.
 
-Stream events (`data: {json}` lines): `status`, `plan`, `tool_start`, `tool_retry`, `tool_end`, `followup`, `token`, then `result`
+Stream events (`data: {json}` lines): `status`, `plan`, `tool_start`, `tool_retry`, `tool_end`, `followup`, `token`, `reset` (a model failed mid-answer: discard the text so far), then `result`
 (or `error`). Closing the connection stops the run.
 
 ## Configuration
@@ -197,6 +197,8 @@ Stream events (`data: {json}` lines): `status`, `plan`, `tool_start`, `tool_retr
 | `AIRAA_TOOL_RETRIES` | 1 | retries on transient tool errors |
 | `AIRAA_MAX_FOLLOWUP_ROUNDS` | 1 | extra gather rounds after reflection |
 | `AIRAA_RATE_LIMIT_PER_MINUTE` | 20 | per client; `0` disables |
+| `AIRAA_SYNTHESIS_FALLBACKS` | `gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite` | tried in order after the synthesis model fails |
+| `AIRAA_FIRST_TOKEN_TIMEOUT` | 30 | seconds to wait for a model's first text before trying the next |
 | `AIRAA_MAX_SESSIONS`, `AIRAA_SESSION_TTL_HOURS` | 200, 24 | in-process session cache limits (the database keeps history) |
 | `DATABASE_URL`, `AIRAA_JWT_SECRET`, ... | (unset) | persistence and wallet features; see `.env.example` for the full list |
 

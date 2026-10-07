@@ -23,7 +23,7 @@ from ..schemas import EventCallback, Plan, ResearchRequest
 from .charts import build_charts
 from .context import build_context, plain_summary
 from .executor import emit, run_tools
-from .llm import synthesis_llm, text_of
+from .llm import STREAM_RESET, synthesis_llm, text_of
 from .merge import merge_results, new_merged
 from .planner import Planner
 from .prompts import SYNTHESIS_SYSTEM_PROMPT
@@ -173,8 +173,8 @@ class Web3ResearchAgent:
             "data_quality_score": score, "tool_trace": trace, "planner": planned["planner"],
             "execution_time": elapsed, "charts": charts,
         }
-        if retrieved is not None and any(retrieved.used.values()):
-            research_data["personalization"] = retrieved.used
+        if retrieved is not None and any(retrieved.used.values()) and not degraded:
+            research_data["personalization"] = retrieved.used   # only claim personalisation the answer really used
         if retrieved is not None and retrieved.citations:
             research_data["knowledge_sources"] = retrieved.citations
         self._remember(request, final, research_data)
@@ -232,6 +232,10 @@ class Web3ResearchAgent:
         try:
             llm = self._synthesis_model if self._synthesis_model is not None else synthesis_llm(self.settings)
             async for chunk in llm.astream(messages):
+                if chunk is STREAM_RESET:   # a model failed mid-answer and the next one is starting over
+                    chunks.clear()
+                    await emit(on_event, {"type": "reset"})
+                    continue
                 piece = text_of(chunk)
                 if piece:
                     chunks.append(piece)
@@ -242,7 +246,8 @@ class Web3ResearchAgent:
             raise RuntimeError("model returned an empty answer")
         except Exception as exc:
             logger.error("Synthesis failed: %s", exc)
-            if not plan.tools or not (merged["primary_data"] or merged["supplementary_data"]):
+            has_data = bool(plan.tools and (merged["primary_data"] or merged["supplementary_data"]))
+            if not (has_data or request.kb_passages):
                 raise  # nothing useful to fall back to; surface the error to the caller
             return plain_summary(request, plan, merged), True, None
 
@@ -265,6 +270,7 @@ class Web3ResearchAgent:
         retrieved = await self.retrieval.build(request)
         request.user_context = retrieved.summary
         request.retrieval_blocks = retrieved.blocks
+        request.kb_passages = retrieved.passages
         if any(retrieved.used.values()):
             await emit(on_event, {"type": "status", "stage": "recalling", "message": "Using what I know about you and the docs",
                                   "used": retrieved.used})

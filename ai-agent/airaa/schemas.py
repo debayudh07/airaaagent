@@ -32,6 +32,7 @@ class ResearchRequest:
     # Filled by the agent from retrieval: a short version for the planner, full blocks for the answer.
     user_context: str = ""
     retrieval_blocks: str = ""
+    kb_passages: List[Dict[str, Any]] = field(default_factory=list)   # {title, url, content}: shown if the model is down
 
     def __post_init__(self) -> None:
         if not self.session_id:

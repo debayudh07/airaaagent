@@ -28,6 +28,7 @@ class Retrieved:
     summary: str = ""                 # short text for the planner
     blocks: str = ""                  # full prompt blocks for the synthesis model
     citations: List[Dict[str, Any]] = field(default_factory=list)
+    passages: List[Dict[str, Any]] = field(default_factory=list)   # trimmed knowledge-base rows for the no-LLM fallback
     used: Dict[str, int] = field(default_factory=dict)   # counts per source, for the UI/trace
 
 
@@ -97,6 +98,7 @@ class Retrieval:
             summary="\n".join(summary_parts),
             blocks="\n\n".join(blocks),
             citations=kb_service.citations(passages),
+            passages=[{"title": p["title"], "url": p["url"], "content": p["content"][:700]} for p in passages],
             used={"memories": len(memories), "watchlist": len(watch), "snapshots": len(personal_data.get("snapshots") or []),
                   "documents": len(passages)},
         )

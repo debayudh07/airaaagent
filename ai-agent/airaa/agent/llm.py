@@ -98,6 +98,11 @@ class _FallbackStructured:
         raise RuntimeError("All models failed: " + "; ".join(errors))
 
 
+# Yielded by FallbackModel.astream when a model failed AFTER some text was already streamed and the next model is
+# starting over: the consumer must discard the draft it has accumulated so far.
+STREAM_RESET: Any = object()
+
+
 class FallbackModel:
     """Duck-typed chat model: ``with_structured_output(schema).ainvoke(...)`` and ``astream(...)``.
 
@@ -105,10 +110,11 @@ class FallbackModel:
     between concurrent requests.
     """
 
-    def __init__(self, models: Sequence[ChatGoogleGenerativeAI]) -> None:
+    def __init__(self, models: Sequence[ChatGoogleGenerativeAI], first_token_timeout: float = 30.0) -> None:
         if not models:
             raise RuntimeError("No models configured")
         self.models = list(models)
+        self.first_token_timeout = first_token_timeout
         self.used: Optional[str] = None
 
     @property
@@ -119,26 +125,51 @@ class FallbackModel:
         return _FallbackStructured(self, schema)
 
     async def astream(self, messages: Any) -> AsyncIterator[Any]:
+        """Stream from the first model that produces text, moving on when a model
+
+        * stalls: no text within ``first_token_timeout`` seconds (an overloaded model can hang for the full HTTP timeout),
+        * returns an empty answer (no text and no exception), or
+        * fails, even partway through (then :data:`STREAM_RESET` tells the consumer to discard the partial draft).
+        """
         errors: List[str] = []
         for model in self.models:
-            started = False
+            emitted = False
+            iterator = model.astream(messages).__aiter__()
             try:
-                async for chunk in model.astream(messages):
-                    started = True
+                while True:
+                    try:
+                        # Only the wait for the first text is bounded; after that the stream is flowing.
+                        chunk = await (asyncio.wait_for(iterator.__anext__(), self.first_token_timeout)
+                                       if not emitted else iterator.__anext__())
+                    except StopAsyncIteration:
+                        break
+                    if text_of(chunk):
+                        emitted = True
                     yield chunk
-                self.used = model.model
-                return
-            except Exception as exc:  # noqa: BLE001
-                if started:
-                    raise  # cannot switch models halfway through an answer
-                errors.append(f"{model.model}: {_short(exc)}")
-                logger.warning("Streaming failed on %s (%s); trying next model", model.model, _short(exc))
+                if emitted:
+                    self.used = model.model
+                    return
+                errors.append(f"{model.model}: empty answer")
+                logger.warning("%s returned no text; trying next model", model.model)
+            except Exception as exc:  # noqa: BLE001 - includes asyncio.TimeoutError
+                reason = "timed out before its first token" if isinstance(exc, asyncio.TimeoutError) else _short(exc)
+                errors.append(f"{model.model}: {reason}")
+                logger.warning("Streaming failed on %s (%s); trying next model", model.model, reason)
+                if emitted:
+                    yield STREAM_RESET  # the next model starts the answer over
+            finally:
+                aclose = getattr(iterator, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception:  # noqa: BLE001 - closing a broken stream may itself fail
+                        pass
         raise RuntimeError("All models failed: " + "; ".join(errors))
 
 
 def _chain(primary: str, fallbacks: Sequence[str], settings: Settings, max_tokens: int | None) -> FallbackModel:
     names = list(dict.fromkeys([primary, *fallbacks]))
-    return FallbackModel([build_llm(n, settings, max_tokens) for n in names])
+    return FallbackModel([build_llm(n, settings, max_tokens) for n in names], settings.first_token_timeout_seconds)
 
 
 def planner_llm(settings: Settings | None = None) -> FallbackModel:

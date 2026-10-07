@@ -45,6 +45,45 @@ _STOP = {
 }
 
 
+# Words that carry no topic. A query is judged on what is left, e.g. "what is Aave protocol explained DeFi" -> {aave}.
+_GENERIC = _STOP | {
+    "explained", "explain", "explanation", "guide", "works", "work", "working", "does", "definition", "meaning", "overview",
+    "introduction", "beginners", "protocol", "protocols", "defi", "blockchain", "token", "tokens", "coin", "coins",
+    "cryptocurrencies", "best", "top", "new", "versus", "between", "difference", "who", "when", "where", "which", "can", "you",
+    "use", "using", "used", "way", "ways", "has", "have", "been", "was", "were", "will", "would", "should", "could", "after",
+    "before", "over", "under", "from", "into", "than", "then", "there", "their", "they", "them", "your", "much", "many",
+}
+
+
+def _aliases(word: str) -> set:
+    """The word plus the other names of the same asset (ethereum <-> eth <-> ether)."""
+    symbol = NAME_TO_SYMBOL.get(word) or (word.upper() if word.upper() in set(NAME_TO_SYMBOL.values()) else None)
+    group = {word}
+    if symbol:
+        group |= {name for name, sym in NAME_TO_SYMBOL.items() if sym == symbol} | {symbol.lower()}
+    return group
+
+
+def relevant_results(term: str, rows: List[Dict[str, Any]]) -> tuple:
+    """Drop search hits that are not about the query. Returns ``(kept_rows, dropped_count)``.
+
+    Search engines occasionally return unrelated pages (a bot-challenged or degraded backend answered an Aave question
+    with articles about plants). A hit is kept when its title, snippet or URL mentions at least half of the query's
+    distinctive words. Queries with no distinctive word cannot be judged and are passed through.
+    """
+    words = [w for w in dict.fromkeys(re.findall(r"[a-z0-9]{3,}", (term or "").lower())) if w not in _GENERIC]
+    if not words:
+        return list(rows), 0
+    need = max(1, -(-len(words) // 2))   # ceil(n / 2)
+    patterns = [[re.compile(rf"(?<![a-z0-9]){re.escape(a)}(?![a-z0-9])") for a in _aliases(w)] for w in words]
+    kept = []
+    for row in rows:
+        haystack = f"{row.get('title') or ''} {row.get('body') or ''} {row.get('href') or ''}".lower()
+        if sum(1 for group in patterns if any(p.search(haystack) for p in group)) >= need:
+            kept.append(row)
+    return kept, len(rows) - len(kept)
+
+
 def _ddgs():
     from ddgs import DDGS  # imported lazily: optional dependency, and slow to import
 
@@ -70,18 +109,33 @@ async def web_search_tool(query: str, search: Optional[str] = None, max_results:
     term = (search or query or "").strip()[:200]
     if not term:
         return {"success": False, "error": "Empty search", "source": "web_search"}
-    try:
-        rows = await asyncio.to_thread(lambda: _ddgs().text(term, region="wt-wt", safesearch="moderate",
-                                                            max_results=max(1, min(max_results, 10))))
-    except Exception as exc:  # ddgs raises its own rate-limit/timeout exception types
-        return {"success": False, "error": f"Web search failed: {type(exc).__name__}", "source": "web_search"}
-    results = [
-        {"title": r.get("title"), "url": r.get("href"), "snippet": (r.get("body") or "")[:400]}
-        for r in rows or [] if r.get("href")
-    ]
-    if not results:
-        return {"success": False, "error": f"No web results for '{term}'", "source": "web_search"}
-    return {"success": True, "data": {"search": term, "results": results}, "metadata": {"engine": "duckduckgo"}, "source": "web_search"}
+    wanted = max(1, min(max_results, 10))
+
+    async def attempt() -> tuple:
+        rows = await asyncio.to_thread(lambda: _ddgs().text(term, region="wt-wt", safesearch="moderate", max_results=wanted + 4))
+        return relevant_results(term, [r for r in rows or [] if r.get("href")])
+
+    kept: List[Dict[str, Any]] = []
+    dropped = 0
+    last_error: Optional[Exception] = None
+    for attempt_no in range(2):   # the engine mix is flaky: one retry when nothing relevant came back
+        try:
+            kept, dropped = await attempt()
+            last_error = None
+        except Exception as exc:  # ddgs raises its own rate-limit/timeout exception types
+            last_error = exc
+        if kept:
+            break
+        if attempt_no == 0:
+            await asyncio.sleep(0.8)
+    if last_error is not None and not kept:
+        return {"success": False, "error": f"Web search failed: {type(last_error).__name__}", "source": "web_search"}
+    if not kept:
+        reason = "no relevant web results" if dropped else "no web results"
+        return {"success": False, "error": f"{reason.capitalize()} for '{term}'", "source": "web_search"}
+    results = [{"title": r.get("title"), "url": r.get("href"), "snippet": (r.get("body") or "")[:400]} for r in kept[:wanted]]
+    return {"success": True, "data": {"search": term, "results": results},
+            "metadata": {"engine": "duckduckgo", "filtered_out": dropped}, "source": "web_search"}
 
 
 # ------------------------------------------------------------------------- news

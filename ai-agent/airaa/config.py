@@ -59,9 +59,11 @@ class Settings:
     synthesis_model: str = field(default_factory=lambda: os.getenv("AIRAA_SYNTHESIS_MODEL", "gemini-3.8-flash"))
     planner_model: str = field(default_factory=lambda: os.getenv("AIRAA_PLANNER_MODEL", "gemini-3.5-flash-lite"))
     # Tried in order when the primary returns 503/429 (quotas are per model).
-    synthesis_fallbacks: tuple = field(default_factory=lambda: _list("AIRAA_SYNTHESIS_FALLBACKS", "gemini-3.6-flash,gemini-3.5-flash"))
+    synthesis_fallbacks: tuple = field(default_factory=lambda: _list("AIRAA_SYNTHESIS_FALLBACKS", "gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite"))
     planner_fallbacks: tuple = field(default_factory=lambda: _list("AIRAA_PLANNER_FALLBACKS", "gemini-3.1-flash-lite,gemini-3.5-flash"))
     # Reads web pages via Gemini's URL context tool (works on the free tier).
+    # An overloaded model can hang for the whole HTTP timeout; give up on it if it has produced no text by then.
+    first_token_timeout_seconds: float = field(default_factory=lambda: _float("AIRAA_FIRST_TOKEN_TIMEOUT", 30))
     reader_model: str = field(default_factory=lambda: os.getenv("AIRAA_READER_MODEL", "gemini-3.5-flash-lite"))
     max_output_tokens: int = field(default_factory=lambda: _int("AIRAA_MAX_OUTPUT_TOKENS", 4000))
     max_charts: int = field(default_factory=lambda: _int("AIRAA_MAX_CHARTS", 3))
