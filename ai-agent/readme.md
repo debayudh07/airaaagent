@@ -58,6 +58,7 @@ ai-agent/
 │   │   ├── prompts.py     system prompts
 │   │   └── llm.py         Gemini factories
 │   └── api/               Flask app factory, routes, validation, rate limiting
+├── evals/                 evals.py: the evaluation suite (offline + live), see "Evals"
 ├── prisma/                migrations/ = the SQL schema (Supabase Postgres + pgvector), applied by Prisma or by airaa.db.migrate
 └── tests/                 pytest suite; tests/integration runs against a real Postgres; tests/manual holds old live-API scripts
 ```
@@ -201,6 +202,52 @@ Stream events (`data: {json}` lines): `status`, `plan`, `tool_start`, `tool_retr
 | `AIRAA_FIRST_TOKEN_TIMEOUT` | 30 | seconds to wait for a model's first text before trying the next |
 | `AIRAA_MAX_SESSIONS`, `AIRAA_SESSION_TTL_HOURS` | 200, 24 | in-process session cache limits (the database keeps history) |
 | `DATABASE_URL`, `AIRAA_JWT_SECRET`, ... | (unset) | persistence and wallet features; see `.env.example` for the full list |
+
+## Evals
+
+One file, [`evals/evals.py`](evals/evals.py), measures the agent. Run it from `ai-agent/` with the project's Python (`.venv`).
+
+```bash
+python evals/evals.py                        # offline suites: deterministic, free, no keys, no network (safe in CI)
+python evals/evals.py --list                 # every suite, its mode and rough cost
+python evals/evals.py --live                 # + live suites against Gemini
+python evals/evals.py --live --limit 5       # cheap smoke run: first 5 cases per suite
+python evals/evals.py --live --repeat 3 --judge   # average over runs; add LLM-graded answer quality
+python evals/evals.py --live --db            # also score the production knowledge base (read-only)
+python evals/evals.py --save-baseline        # record today's numbers
+python evals/evals.py --baseline             # exit 1 if anything is worse than the baseline or below its target
+```
+
+Offline mode blanks the model keys before importing anything, so it cannot spend money. Every proportion prints with `n`
+and a 95% confidence interval; with 40 cases a score of 90% really means "somewhere in 77-96%", so ignore differences
+smaller than the interval. A `target` is a policy gate, not an observation.
+
+| Suite | Mode | What it answers | Main metrics |
+|---|---|---|---|
+| `planner_rules` | offline | Does the rule-based fallback planner choose the right tools and entities? | tool recall / precision / F1, exact-plan rate, over-fetch rate, symbol / protocol F1, **Etherscan-without-address must be 0** |
+| `planner_llm` | live | Same, for the LLM planner | the above + fallback rate, latency p50/p95 |
+| `context_fidelity` | offline | Does the prompt keep every fact it was handed? | fact coverage, failed-source reporting, untrusted-text fencing |
+| `grounding_validity` | offline | Does the hallucination checker itself work? | specificity, sensitivity, count accuracy (must be 100%) |
+| `web_relevance` | offline | Does the web-search filter drop junk and keep real hits? | junk rejection, relevant retention |
+| `retrieval` | offline + live | Does knowledge-base search find the right doc, and abstain when it should? | hit@1/3/5, MRR@10, nDCG@5, abstention ROC-AUC, false-positive rate at the cut-off; BM25 offline, vector + hybrid live |
+| `cache_safety` | offline + live | Can the tool cache ever serve the wrong data? | key collisions (must be 0), wallet tools cached (must be 0), semantic false-hit rate at the threshold, threshold sweep |
+| `e2e` | live | Does the whole agent answer faithfully on frozen data? | **numeric grounding rate**, required-fact recall, honesty when data is missing, URL integrity, plan accuracy, citation / format adherence, degraded rate, latency |
+| `injection` | live | Do instructions hidden in news or web text get obeyed, leaked or repeated as fact? | injection resistance (must be 100%) |
+| `memory` | live | Does long-term memory capture durable facts without noise or secrets? | fact recall, noise rate, **secret leak rate must be 0**, volatile prices stored |
+
+How "numeric grounding" is scored: every figure in an answer must appear in the data the model was shown (exactly, to its
+displayed precision, or within 0.5%), be derivable from it (sums, differences, ratios, percentage shares), or come from
+the question. Dates, URLs, durations, list positions, years and the follow-up question list are not figures. The
+`grounding_validity` suite checks this on known-good and planted-bad answers, so run it first if live grounding numbers
+look odd.
+
+Adding a case is one line in the relevant list near the top of the file (`PLANNER_CASES`, `E2E_CASES`, `INJECTION_CASES`,
+`RETRIEVAL_GOLD`, `MEMORY_CASES`, `SEMANTIC_SAME` / `SEMANTIC_DIFFERENT`, `WEB_CASES`). The harness has its own tests
+(`tests/test_evals_harness.py`), which also run the live suites against scripted models with known behaviour.
+
+Limits: gold sets are small and written by hand; the retrieval questions were written against the spec's own wording, so BM25 is
+optimistic and best used as a regression floor; live results vary run to run (use `--repeat`); the LLM judge is noisy and
+favours its own style, so trust trends, not single scores.
 
 ## Add a tool
 

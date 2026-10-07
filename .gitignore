@@ -12,3 +12,6 @@ venv/
 
 # Prisma tooling deps (ai-agent/package.json)
 ai-agent/node_modules/
+
+# Eval run outputs (evals/baseline.json is kept)
+ai-agent/evals/results/
