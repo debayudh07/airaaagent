@@ -19,7 +19,13 @@ logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100          # the API accepts up to 100 texts per call
 MAX_CHARS = 8000          # ~2k tokens; longer inputs are truncated rather than rejected
-_RETRIES = 3
+_RETRIES = 4
+_RATE_LIMIT_WAITS = (4.0, 12.0, 25.0)   # seconds before retry 1, 2, 3 when the API says "slow down" (HTTP 429)
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "429" in text or "resource_exhausted" in text or "rate limit" in text or "quota" in text
 
 
 class EmbeddingUnavailable(RuntimeError):
@@ -85,9 +91,12 @@ class Embedder:
                 except EmbeddingUnavailable:
                     raise
                 except Exception as exc:  # noqa: BLE001 - quota/availability errors are retried, then surfaced
+                    limited = _is_rate_limit(exc)
                     if attempt == _RETRIES - 1:
-                        raise EmbeddingUnavailable(f"Embedding failed: {type(exc).__name__}") from exc
-                    time.sleep(0.5 * (2 ** attempt) + random.random() * 0.2)
+                        why = "rate limited (per-minute embedding quota)" if limited else type(exc).__name__
+                        raise EmbeddingUnavailable(f"Embedding failed: {why}") from exc
+                    # Per-minute quotas need seconds to clear; ordinary blips need a moment.
+                    time.sleep((_RATE_LIMIT_WAITS[attempt] if limited else 0.5 * (2 ** attempt)) + random.random() * 0.3)
         return out
 
     def embed_one_sync(self, text: str, task: str = "query") -> List[float]:

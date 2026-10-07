@@ -279,3 +279,49 @@ def test_docs_alone_are_enough_to_answer_when_the_model_is_down_and_no_tool_ran(
                           planner_llm=plan_llm, synthesis_model=FakeSynthesisLLM(error=RuntimeError("503")))
     result = run(a.research(ResearchRequest(query="what is aave", session_id="session-12345", wallet_id="w1")))
     assert result["success"] and "health factor" in result["result"]
+
+
+# ----------------------------------------------------------------------- embedding retries
+def _embedder_with(client, monkeypatch):
+    from airaa import embeddings
+    from airaa.config import Settings
+
+    waits = []
+    monkeypatch.setattr(embeddings.time, "sleep", lambda seconds: waits.append(round(seconds)))
+    return embeddings.Embedder(Settings(gemini_api_key="t"), client=client), waits
+
+
+class _Resp:
+    def __init__(self, n):
+        self.embeddings = [type("E", (), {"values": [1.0] + [0.0] * 767})() for _ in range(n)]
+
+
+class _Models:
+    def __init__(self, *errors):
+        self.errors, self.calls = list(errors), 0
+
+    def embed_content(self, model, contents, config):
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return _Resp(len(contents))
+
+
+def test_embedder_waits_out_a_rate_limit_instead_of_failing_in_a_second(monkeypatch):
+    models = _Models(RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded"), RuntimeError("429 RESOURCE_EXHAUSTED"))
+    embedder, waits = _embedder_with(type("C", (), {"models": models})(), monkeypatch)
+    assert len(embedder.embed_sync(["a", "b"])) == 2 and models.calls == 3
+    assert waits[0] >= 4 and waits[1] >= 12                       # backs off for seconds, not milliseconds
+
+
+def test_embedder_retries_ordinary_errors_quickly_and_names_a_rate_limit_when_it_gives_up(monkeypatch):
+    from airaa.embeddings import EmbeddingUnavailable
+
+    blip = _Models(RuntimeError("connection reset"))
+    embedder, waits = _embedder_with(type("C", (), {"models": blip})(), monkeypatch)
+    assert embedder.embed_sync(["a"]) and waits == [0] or waits[0] < 2
+
+    always = _Models(*[RuntimeError("429 quota")] * 10)
+    embedder, _ = _embedder_with(type("C", (), {"models": always})(), monkeypatch)
+    with pytest.raises(EmbeddingUnavailable, match="rate limited"):
+        embedder.embed_sync(["a"])

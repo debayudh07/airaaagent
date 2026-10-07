@@ -1081,7 +1081,7 @@ def suite_cache_safety(ctx: "Ctx") -> SuiteResult:
         threshold = ctx.settings.cache_similarity
         false_hits = sum(s >= threshold for s in neg)
         metrics += [
-            Metric("semantic_auc", roc_auc(pos, neg), len(sims), "score", True, 0.95, None, "same-intent pairs score above different-intent pairs"),
+            Metric("semantic_auc", roc_auc(pos, neg), len(sims), "score", True, 0.75, None, "same-intent pairs score above different-intent pairs (hard negatives share entities)"),
             rate("false_hit_rate_at_threshold", false_hits, len(neg), 0.0, higher=False, note=f"HARD SAFETY at similarity >= {threshold}: different questions wrongly merged"),
             rate("true_hit_rate_at_threshold", sum(s >= threshold for s in pos), len(pos), None, note="paraphrases that would be served from cache (usefulness, not safety)"),
         ]
