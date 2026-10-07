@@ -76,6 +76,21 @@ def test_empty_llm_plan_falls_back(settings, sessions):
     assert out["planner"] == "heuristic" and out["plan"].tools == ["defillama_tool"]
 
 
+def test_empty_llm_plan_is_honoured_for_conceptual_questions(settings, sessions):
+    """"What is impermanent loss?" needs no live data; the rules' catch-all market quote must not override the model."""
+    llm = FakePlannerLLM(plan=Plan(intent="general", tools=[]))
+    for question in ("what is impermanent loss", "explain how gas fees work", "what does a liquid staking token do"):
+        out = run(make(settings, sessions, llm).plan(req(question)))
+        assert out["planner"] == "llm" and out["plan"].tools == [], question
+
+
+def test_empty_llm_plan_is_overridden_when_the_question_names_something_to_fetch(settings, sessions):
+    llm = FakePlannerLLM(plan=Plan(intent="general", tools=[]))
+    for question, expected in (("price of eth", "coinmarketcap_tool"), ("any news about the uniswap hack", "news_tool"), ("tvl of lido", "defillama_tool")):
+        out = run(make(settings, sessions, llm).plan(req(question)))
+        assert out["planner"] == "heuristic" and expected in out["plan"].tools, question
+
+
 # ------------------------------------------------------------------ reflection
 def test_reflection_returns_followup(settings, sessions):
     decision = FollowUp(needs_more=True, tools=["defillama_tool"], reason="TVL missing")

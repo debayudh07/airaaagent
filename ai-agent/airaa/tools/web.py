@@ -26,7 +26,7 @@ from langchain_core.tools import tool
 
 from .. import http
 from ..config import get_settings
-from ..utils.assets import NAME_TO_SYMBOL
+from ..utils.assets import ETHERSCAN_CHAIN_IDS, KNOWN_PROTOCOLS, NAME_TO_SYMBOL
 from ..utils.net import UnsafeURL, check_public_url, fetch_page_text, html_to_text
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,12 @@ _GENERIC = _STOP | {
     "cryptocurrencies", "best", "top", "new", "versus", "between", "difference", "who", "when", "where", "which", "can", "you",
     "use", "using", "used", "way", "ways", "has", "have", "been", "was", "were", "will", "would", "should", "could", "after",
     "before", "over", "under", "from", "into", "than", "then", "there", "their", "they", "them", "your", "much", "many",
+    "next", "last", "first", "latest", "current", "recent", "date", "year", "month",
 }
+# Names a query is *about*. When one appears in the query, a hit must mention it: a page that merely shares a generic word
+# ("hooks", "founded") with "uniswap v4 hooks" or "who founded Chainlink" is not about Uniswap or Chainlink.
+_ENTITY_WORDS = (set(NAME_TO_SYMBOL) | {s.lower() for s in NAME_TO_SYMBOL.values()} | set(ETHERSCAN_CHAIN_IDS)
+                 | {p for p in KNOWN_PROTOCOLS if " " not in p and "-" not in p})
 
 
 def _aliases(word: str) -> set:
@@ -75,11 +80,19 @@ def relevant_results(term: str, rows: List[Dict[str, Any]]) -> tuple:
     if not words:
         return list(rows), 0
     need = max(1, -(-len(words) // 2))   # ceil(n / 2)
-    patterns = [[re.compile(rf"(?<![a-z0-9]){re.escape(a)}(?![a-z0-9])") for a in _aliases(w)] for w in words]
+
+    def pattern(alias: str):
+        plural = r"(?:s|es|ed|ing|er|ers)?" if len(alias) >= 5 else ""   # "outage" matches "outages"; "eth" does not match "ethic"
+        return re.compile(rf"(?<![a-z0-9]){re.escape(alias)}{plural}(?![a-z0-9])")
+
+    patterns = [[pattern(a) for a in _aliases(w)] for w in words]
+    entity_groups = [group for w, group in zip(words, patterns) if w in _ENTITY_WORDS]
     kept = []
     for row in rows:
         haystack = f"{row.get('title') or ''} {row.get('body') or ''} {row.get('href') or ''}".lower()
-        if sum(1 for group in patterns if any(p.search(haystack) for p in group)) >= need:
+        matched = [any(p.search(haystack) for p in group) for group in patterns]
+        about_the_entity = not entity_groups or any(any(p.search(haystack) for p in group) for group in entity_groups)
+        if sum(matched) >= need and about_the_entity:
             kept.append(row)
     return kept, len(rows) - len(kept)
 

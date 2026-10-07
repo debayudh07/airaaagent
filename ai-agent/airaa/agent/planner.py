@@ -61,7 +61,15 @@ class Planner:
             plan = self._sanitise(plan, request)
             if plan.tools:
                 return {"plan": plan, "planner": "llm", "steps": self._steps(plan, "LLM planner")}
-            logger.info("LLM planner chose no tools; using rule-based plan")
+            # The model says no data is needed. Honour that for conceptual questions ("what is impermanent loss?"), but
+            # double-check with the rules: if they find something specific to fetch (a named coin or protocol, a URL, or a
+            # topic like TVL or news) the empty plan was probably a mistake. Their catch-all market quote does not count.
+            rules = self.heuristic_plan(request)
+            specific = bool(rules.entities.symbols or rules.entities.protocols or rules.entities.urls
+                            or set(rules.tools) - {"coinmarketcap_tool"})
+            if not specific:
+                return {"plan": plan, "planner": "llm", "steps": self._steps(plan, "LLM planner")}
+            logger.info("LLM planner chose no tools but the question names something to look up; using rule-based plan")
         except Exception as exc:
             logger.warning("LLM planner unavailable (%s); using rule-based plan", exc)
         plan = self.heuristic_plan(request)
