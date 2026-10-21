@@ -15,4 +15,20 @@ jobs:
       - name: Ping health endpoint
         env:
           URL: ${{ vars.BACKEND_HEALTH_URL || 'https://airaaagent.onrender.com/api/health' }}
-        run: curl --fail --silent --show-error --max-time 90 "$URL"
+        run: |
+          attempts=6
+          delay=10
+
+          for i in $(seq 1 "$attempts"); do
+            if curl --fail --silent --show-error --max-time 90 "$URL"; then
+              exit 0
+            fi
+
+            if [ "$i" -lt "$attempts" ]; then
+              echo "Health check failed (attempt $i/$attempts), retrying in ${delay}s..."
+              sleep "$delay"
+            fi
+          done
+
+          echo "Health check failed after ${attempts} attempts."
+          exit 1
